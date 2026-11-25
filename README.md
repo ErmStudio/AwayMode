@@ -1,4 +1,4 @@
-# AwayMode 2.0 — Wi-Fi automation test
+# AwayMode 0.2-test — Wi-Fi automation test
 
 Android app (Java, no third-party runtime libraries) for testing Wi-Fi-based INCY VPN automation.
 
@@ -31,3 +31,7 @@ The service is started manually from the app in this test build. Automatic resta
 4. Unzip and install `app-debug.apk`.
 
 Debug APK is for local testing, not Play Store distribution.
+
+
+## Исправление 0.2-test
+Мониторинг подписывается только на Wi-Fi, а не на основную сеть Android (которая меняется при включении VPN). Временное отсутствие SSID больше не считается отключением от доверенной сети. При потере Wi-Fi выдерживается задержка 12 секунд.

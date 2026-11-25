@@ -35,6 +35,7 @@ public class WifiMonitorService extends Service {
     private SharedPreferences prefs;
     private String statusText = "Ожидание изменения Wi-Fi";
     private boolean lastConnectRequested = true;
+    private volatile boolean wifiLossPending = false;
 
     @Override public void onCreate() {
         super.onCreate();
@@ -55,12 +56,25 @@ public class WifiMonitorService extends Service {
     private void registerNetworkCallback() {
         if (connectivity == null) { setStatus("Не удалось получить ConnectivityManager"); return; }
         callback = new ConnectivityManager.NetworkCallback() {
-            @Override public void onAvailable(Network network) { scheduleEvaluation(12000); }
-            @Override public void onLost(Network network) { scheduleEvaluation(12000); }
-            @Override public void onCapabilitiesChanged(Network network, NetworkCapabilities caps) { scheduleEvaluation(12000); }
+            @Override public void onAvailable(Network network) {
+                // Появился именно Wi-Fi. Это также сбрасывает ожидание потери старой сети.
+                wifiLossPending = false;
+                scheduleEvaluation(2000);
+            }
+            @Override public void onLost(Network network) {
+                // Не включаем VPN немедленно: Android может тут же подключить другой Wi-Fi.
+                wifiLossPending = true;
+                scheduleEvaluation(12000);
+            }
+            @Override public void onCapabilitiesChanged(Network network, NetworkCapabilities caps) {
+                scheduleEvaluation(2000);
+            }
         };
         try {
-            connectivity.registerDefaultNetworkCallback(callback);
+            NetworkRequest request = new NetworkRequest.Builder()
+                    .addTransportType(NetworkCapabilities.TRANSPORT_WIFI)
+                    .build();
+            connectivity.registerNetworkCallback(request, callback);
         } catch (Exception e) {
             setStatus("Не удалось включить мониторинг: " + e.getClass().getSimpleName());
         }
@@ -79,25 +93,39 @@ public class WifiMonitorService extends Service {
         Set<String> white = prefs.getStringSet(MainActivity.WHITE, Collections.emptySet());
         Set<String> black = prefs.getStringSet(MainActivity.BLACK, Collections.emptySet());
 
-        if (current != null && white.contains(current)) {
-            requestVpnAction(false, "Доверенная сеть «" + current + "»: отключаем INCY");
-            prefs.edit().putString(LAST_SSID, current).apply();
-            return;
-        }
-        if (current != null && black.contains(current)) {
-            requestVpnAction(true, "Сеть «" + current + "» в чёрном списке: включаем INCY");
-            prefs.edit().putString(LAST_SSID, current).apply();
+        // Пустой SSID сам по себе ничего не доказывает: Android может временно скрыть
+        // имя сети. Считаем это отключением только после события onLost именно Wi-Fi.
+        if (current == null) {
+            if (wifiLossPending) {
+                wifiLossPending = false;
+                if (!previous.isEmpty() && white.contains(previous)) {
+                    requestVpnAction(true, "Потеряна доверенная сеть «" + previous + "»: включаем INCY");
+                } else {
+                    setStatus("Wi-Fi отключён; правило для этой сети не требует действий");
+                }
+                prefs.edit().putString(LAST_SSID, "").apply();
+            } else {
+                setStatus("Имя Wi-Fi временно недоступно; состояние VPN не меняем");
+            }
             return;
         }
 
-        // Если ушли именно из сети белого списка (в мобильную сеть или неизвестный Wi-Fi),
-        // включаем VPN. Выход из чёрного списка и неизвестные переходы ничего не меняют.
-        if (!previous.isEmpty() && white.contains(previous)) {
-            requestVpnAction(true, "Потеряна доверенная сеть «" + previous + "»: включаем INCY");
-        } else {
-            setStatus(current == null ? "Wi-Fi не подключён; правило не сработало" : "Неизвестная сеть «" + current + "»: без изменений");
+        wifiLossPending = false;
+        if (current.equals(previous)) {
+            setStatus("Сеть «" + current + "» без изменений; VPN не трогаем");
+            return;
         }
-        prefs.edit().putString(LAST_SSID, current == null ? "" : current).apply();
+
+        if (white.contains(current)) {
+            requestVpnAction(false, "Доверенная сеть «" + current + "»: отключаем INCY");
+        } else if (black.contains(current)) {
+            requestVpnAction(true, "Сеть «" + current + "» в чёрном списке: включаем INCY");
+        } else if (!previous.isEmpty() && white.contains(previous)) {
+            requestVpnAction(true, "Покинули доверенную сеть «" + previous + "»: включаем INCY");
+        } else {
+            setStatus("Неизвестная сеть «" + current + "»: состояние VPN не меняем");
+        }
+        prefs.edit().putString(LAST_SSID, current).apply();
     }
 
     private String readSsid() {
