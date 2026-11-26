@@ -46,6 +46,7 @@ public class WifiMonitorService extends Service {
         connectivity = (ConnectivityManager) getSystemService(CONNECTIVITY_SERVICE);
         createChannel();
         startForeground(NOTIFICATION_ID, buildNotification("Мониторинг Wi-Fi запущен · " + BuildConfig.VERSION_NAME));
+        prefs.edit().putBoolean(MainActivity.SERVICE_ALIVE, true).apply();
         MainActivity.appendLog(this, "Мониторинг запущен, версия " + BuildConfig.VERSION_NAME);
         registerNetworkCallback();
         scheduleEvaluation(3000);
@@ -111,7 +112,7 @@ public class WifiMonitorService extends Service {
         String previousDecision = prefs.getString(LAST_DECISION, "");
         if (target.key.equals(previousDecision)) {
             setStatus(target.connect != null
-                    ? "Состояние сети не изменилось; команда уже отправлялась, статус INCY неизвестен"
+                    ? "Сеть не изменилась · повторную команду не отправляю"
                     : target.reason);
             return;
         }
@@ -206,6 +207,7 @@ public class WifiMonitorService extends Service {
 
     @Override public void onDestroy() {
         handler.removeCallbacksAndMessages(null);
+        if (prefs != null) prefs.edit().putBoolean(MainActivity.SERVICE_ALIVE, false).apply();
         if (prefs != null) prefs.unregisterOnSharedPreferenceChangeListener(ruleListener);
         if (connectivity != null && callback != null) {
             try { connectivity.unregisterNetworkCallback(callback); } catch (Exception ignored) {}

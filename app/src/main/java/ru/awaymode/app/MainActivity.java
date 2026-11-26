@@ -1,6 +1,7 @@
-package ru.awaymode.app;
+﻿package ru.awaymode.app;
 
 import android.Manifest;
+import android.app.ActivityManager;
 import android.app.Activity;
 import android.app.AlertDialog;
 import android.app.PendingIntent;
@@ -29,6 +30,7 @@ import android.view.ViewGroup;
 import android.widget.Button;
 import android.widget.EditText;
 import android.widget.LinearLayout;
+import android.widget.ImageView;
 import android.widget.ScrollView;
 import android.widget.Switch;
 import android.widget.TextView;
@@ -58,6 +60,9 @@ public class MainActivity extends Activity {
     static final String BLACK = "black_ssids";
     static final String KNOWN = "known_ssids";
     static final String AUTO = "automation_enabled";
+    static final String SERVICE_ALIVE = "monitor_service_alive";
+    static final String RESTORE_AUTO_AFTER_UPDATE = "restore_auto_after_update";
+    static final String RESTORE_AUTO_TIMESTAMP = "restore_auto_timestamp";
     static final String LOG = "event_log";
     private static final String PENDING_APK = "pending_update_apk";
     private static final int REQ_LOCATION = 101;
@@ -67,12 +72,13 @@ public class MainActivity extends Activity {
     private WifiManager wifi;
     private LinearLayout root, networkRows;
     private EditText search;
-    private TextView currentLabel, automationLabel, logView;
+    private TextView currentLabel, currentHint, automationLabel, automationHint, logView, networkEmpty;
     private Switch automationSwitch;
     private String currentSsid;
     private File pendingApk;
     private final SharedPreferences.OnSharedPreferenceChangeListener logListener = (shared, key) -> {
         if (LOG.equals(key)) refreshLog();
+        if (AUTO.equals(key) || SERVICE_ALIVE.equals(key)) runOnUiThread(this::updateAutomationUi);
     };
 
     @Override public void onCreate(Bundle state) {
@@ -90,57 +96,109 @@ public class MainActivity extends Activity {
         super.onResume();
         if (prefs != null) {
             refreshCurrent();
+            ensureAutomationServiceRunning();
             updateAutomationUi();
             refreshLog();
             installPendingApkIfAllowed(false);
+            handler.postDelayed(this::updateAutomationUi, 700);
         }
     }
 
     private void buildUi() {
         ScrollView scroll = new ScrollView(this);
+        scroll.setFillViewport(true);
+        scroll.setClipToPadding(false);
         root = new LinearLayout(this);
         root.setOrientation(LinearLayout.VERTICAL);
-        root.setPadding(dp(18), dp(22), dp(18), dp(30));
-        root.setBackgroundColor(0xFF101827);
+        root.setPadding(dp(18), dp(18), dp(18), dp(32));
+        root.setBackgroundColor(0xFFF1F6F3);
         scroll.addView(root);
 
-        TextView title = text("AwayMode", 29, 0xFFFFFFFF, true);
-        title.setGravity(Gravity.CENTER);
-        add(title, 0, 2);
-        TextView subtitle = text("Автоматизация INCY по Wi-Fi", 14, 0xFFB7C2D3, false);
-        subtitle.setGravity(Gravity.CENTER);
-        add(subtitle, 0, 18);
+        LinearLayout header = new LinearLayout(this);
+        header.setOrientation(LinearLayout.HORIZONTAL);
+        header.setGravity(Gravity.CENTER_VERTICAL);
+        ImageView logo = new ImageView(this);
+        logo.setImageResource(R.mipmap.ic_launcher);
+        header.addView(logo, new LinearLayout.LayoutParams(dp(54), dp(54)));
+        LinearLayout heading = new LinearLayout(this);
+        heading.setOrientation(LinearLayout.VERTICAL);
+        LinearLayout.LayoutParams headingParams = new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1);
+        headingParams.leftMargin = dp(12);
+        header.addView(heading, headingParams);
+        heading.addView(text("AwayMode", 25, 0xFF173B2D, true));
+        heading.addView(text("Управление INCY по Wi-Fi", 13, 0xFF64796F, false));
+        TextView version = text("v" + BuildConfig.VERSION_NAME, 11, 0xFF146C47, true);
+        version.setGravity(Gravity.CENTER);
+        version.setPadding(dp(10), dp(7), dp(10), dp(7));
+        version.setBackground(round(0xFFD9F0E2, 20));
+        header.addView(version);
+        add(header, 0, 18);
 
-        currentLabel = text("Текущая сеть: определяем…", 15, 0xFFFFFFFF, true);
-        card(currentLabel, 14, 12);
+        LinearLayout networkHero = new LinearLayout(this);
+        networkHero.setOrientation(LinearLayout.VERTICAL);
+        networkHero.setPadding(dp(18), dp(16), dp(18), dp(16));
+        networkHero.setBackground(gradient(0xFF0E6546, 0xFF13865A, 22));
+        networkHero.addView(text("ТЕКУЩЕЕ ПОДКЛЮЧЕНИЕ", 10, 0xFFC7EBD7, true));
+        currentLabel = text("Определяем сеть…", 21, 0xFFFFFFFF, true);
+        currentLabel.setMaxLines(2);
+        LinearLayout.LayoutParams currentParams = full();
+        currentParams.topMargin = dp(5);
+        networkHero.addView(currentLabel, currentParams);
+        currentHint = text("Проверяю состояние Wi-Fi", 12, 0xFFE0F4E8, false);
+        LinearLayout.LayoutParams hintParams = full();
+        hintParams.topMargin = dp(3);
+        networkHero.addView(currentHint, hintParams);
+        add(networkHero, 0, 12);
 
-        TextView section = text("СЕТИ WI-FI", 15, 0xFF91A9FF, true);
-        add(section, 0, 6);
-        TextView note = text("Здесь отображаются сети, добавленные в AwayMode, и текущая сеть. Полный список сохранённых Wi-Fi сетей Android сторонним приложениям не открывает. Добавь сеть вручную или подключись к ней и нажми «Добавить текущую».", 12, 0xFF9AA8BD, false);
-        add(note, 0, 12);
+        LinearLayout autoCard = new LinearLayout(this);
+        autoCard.setOrientation(LinearLayout.HORIZONTAL);
+        autoCard.setGravity(Gravity.CENTER_VERTICAL);
+        autoCard.setPadding(dp(16), dp(13), dp(14), dp(13));
+        autoCard.setBackground(surfaceBackground());
+        LinearLayout labels = new LinearLayout(this);
+        labels.setOrientation(LinearLayout.VERTICAL);
+        automationLabel = text("Автоматизация выключена", 16, 0xFF173B2D, true);
+        labels.addView(automationLabel);
+        automationHint = text("Включи, чтобы отслеживать смену сети", 12, 0xFF64796F, false);
+        LinearLayout.LayoutParams autoHintParams = full();
+        autoHintParams.topMargin = dp(3);
+        labels.addView(automationHint, autoHintParams);
+        autoCard.addView(labels, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1));
+        automationSwitch = new Switch(this);
+        automationSwitch.setOnCheckedChangeListener((v, checked) -> {
+            if (checked) startAutomation(); else stopAutomation();
+        });
+        autoCard.addView(automationSwitch);
+        add(autoCard, 0, 20);
+
+        sectionTitle("СЕТИ И ПРАВИЛА", "Твои сети и действия INCY");
+        TextView note = text("Android не разрешает сторонним приложениям читать полный список сохранённых Wi-Fi. Добавь сеть вручную или подключись к ней.", 12, 0xFF64796F, false);
+        add(note, 0, 10);
 
         LinearLayout scanBar = new LinearLayout(this);
         scanBar.setOrientation(LinearLayout.HORIZONTAL);
         scanBar.setGravity(Gravity.CENTER_VERTICAL);
-        Button scan = button("Добавить текущую");
+        Button scan = button("＋ Текущая сеть");
         scan.setOnClickListener(v -> addCurrentNetwork());
         scanBar.addView(scan, new LinearLayout.LayoutParams(0, dp(46), 1));
-        Button manual = button("Ввести вручную");
+        Button manual = button("Добавить вручную");
+        manual.setTextColor(0xFF21553E);
+        manual.setBackground(round(0xFFDDEEE4, 13));
         manual.setOnClickListener(v -> askForSsid());
-        LinearLayout.LayoutParams mp = new LinearLayout.LayoutParams(0, dp(46), 1);
-        mp.leftMargin = dp(8);
-        scanBar.addView(manual, mp);
+        LinearLayout.LayoutParams manualParams = new LinearLayout.LayoutParams(0, dp(46), 1);
+        manualParams.leftMargin = dp(8);
+        scanBar.addView(manual, manualParams);
         add(scanBar, 0, 10);
 
         search = new EditText(this);
         search.setSingleLine(true);
-        search.setTextColor(0xFFFFFFFF);
-        search.setHintTextColor(0xFF8795AA);
-        search.setHint("Поиск по названию сети");
-        search.setTextSize(15);
-        search.setPadding(dp(14), dp(10), dp(14), dp(10));
-        search.setBackground(round(0xFF202D40, 12));
-        add(search, 0, 8);
+        search.setTextColor(0xFF173B2D);
+        search.setHintTextColor(0xFF84968D);
+        search.setHint("⌕  Найти сеть");
+        search.setTextSize(14);
+        search.setPadding(dp(14), dp(8), dp(14), dp(8));
+        search.setBackground(surfaceBackground());
+        add(search, 0, 10);
         search.addTextChangedListener(new TextWatcher() {
             public void beforeTextChanged(CharSequence s, int st, int c, int a) {}
             public void onTextChanged(CharSequence s, int st, int before, int count) { renderNetworks(); }
@@ -149,60 +207,63 @@ public class MainActivity extends Activity {
 
         networkRows = new LinearLayout(this);
         networkRows.setOrientation(LinearLayout.VERTICAL);
+        networkEmpty = text("Список пока пуст. Добавь текущую или введи сохранённую сеть вручную.", 13, 0xFF71837A, false);
+        networkEmpty.setPadding(dp(4), dp(8), dp(4), dp(12));
+        add(networkEmpty, 0, 0);
         add(networkRows, 0, 18);
 
-        TextView automationTitle = text("АВТОМАТИЗАЦИЯ", 15, 0xFF91A9FF, true);
-        add(automationTitle, 0, 8);
-        LinearLayout autoCard = new LinearLayout(this);
-        autoCard.setOrientation(LinearLayout.HORIZONTAL);
-        autoCard.setGravity(Gravity.CENTER_VERTICAL);
-        autoCard.setPadding(dp(14), dp(12), dp(14), dp(12));
-        autoCard.setBackground(round(0xFF202D40, 14));
-        LinearLayout labels = new LinearLayout(this);
-        labels.setOrientation(LinearLayout.VERTICAL);
-        automationLabel = text("Мониторинг выключен", 15, 0xFFFFFFFF, true);
-        labels.addView(automationLabel);
-        TextView autoHint = text("Работа в фоне через уведомление", 11, 0xFF9AA8BD, false);
-        labels.addView(autoHint);
-        autoCard.addView(labels, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1));
-        automationSwitch = new Switch(this);
-        automationSwitch.setOnCheckedChangeListener((v, checked) -> {
-            if (checked) startAutomation(); else stopAutomation();
-        });
-        autoCard.addView(automationSwitch);
-        add(autoCard, 0, 12);
+        LinearLayout rulesCard = new LinearLayout(this);
+        rulesCard.setOrientation(LinearLayout.VERTICAL);
+        rulesCard.setPadding(dp(15), dp(13), dp(15), dp(13));
+        rulesCard.setBackground(surfaceBackground());
+        rulesCard.addView(text("КАК РАБОТАЮТ ПРАВИЛА", 11, 0xFF146C47, true));
+        TextView rules = text("Выключить VPN — доверенная сеть. Включить VPN — сеть, где нужен туннель. Без Wi-Fi VPN включается. Не учитывать — оставить состояние как есть.", 12, 0xFF52685E, false);
+        LinearLayout.LayoutParams rulesParams = full();
+        rulesParams.topMargin = dp(5);
+        rulesCard.addView(rules, rulesParams);
+        add(rulesCard, 0, 10);
 
-        TextView rules = text("Выключить VPN — доверенная сеть. Включить VPN — остальные выбранные сети. Не учитывать — оставить без правила. Без Wi-Fi INCY должен быть включён; после потери Wi-Fi AwayMode проверит подключение через 3 секунды.", 12, 0xFF9AA8BD, false);
-        add(rules, 0, 8);
-        TextView battery = text("Для стабильной работы на Xiaomi отключи ограничения батареи для AwayMode и разреши автозапуск в настройках HyperOS.", 12, 0xFFFFD28A, false);
-        add(battery, 0, 8);
+        TextView battery = text("Для надёжной работы на Xiaomi разреши AwayMode автозапуск и работу без ограничений батареи.", 12, 0xFF8A6532, false);
+        battery.setPadding(dp(3), dp(4), dp(3), dp(4));
+        add(battery, 0, 12);
 
-        Button update = button("Проверить обновление");
+        LinearLayout updateCard = new LinearLayout(this);
+        updateCard.setOrientation(LinearLayout.HORIZONTAL);
+        updateCard.setGravity(Gravity.CENTER_VERTICAL);
+        updateCard.setPadding(dp(15), dp(11), dp(11), dp(11));
+        updateCard.setBackground(surfaceBackground());
+        TextView updateInfo = text("Обновления приложения\nУстановленная версия v" + BuildConfig.VERSION_NAME, 12, 0xFF52685E, false);
+        updateCard.addView(updateInfo, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1));
+        Button update = button("Проверить");
         update.setOnClickListener(v -> checkForUpdate());
-        add(update, 14, 8);
+        updateCard.addView(update, new LinearLayout.LayoutParams(dp(116), dp(44)));
+        add(updateCard, 0, 20);
 
-        TextView logTitle = text("ЖУРНАЛ СОБЫТИЙ", 15, 0xFF91A9FF, true);
-        add(logTitle, 0, 8);
-        TextView logNote = text("Хранится до 120 событий, показаны последние 40.", 11, 0xFF9AA8BD, false);
-        add(logNote, 0, 8);
+        sectionTitle("ЖУРНАЛ", "До 120 событий · показаны последние 40");
         LinearLayout logActions = new LinearLayout(this);
         logActions.setOrientation(LinearLayout.HORIZONTAL);
-        Button shareLogs = button("Отправить логи разработчику");
+        Button shareLogs = button("Поделиться логом");
         shareLogs.setOnClickListener(v -> confirmShareLogs());
         logActions.addView(shareLogs, new LinearLayout.LayoutParams(0, dp(46), 1));
         Button clearLogs = button("Очистить");
+        clearLogs.setTextColor(0xFF52685E);
+        clearLogs.setBackground(round(0xFFE4ECE7, 13));
         clearLogs.setOnClickListener(v -> confirmClearLogs());
         LinearLayout.LayoutParams clearParams = new LinearLayout.LayoutParams(dp(96), dp(46));
         clearParams.leftMargin = dp(8);
         logActions.addView(clearLogs, clearParams);
         add(logActions, 0, 8);
-        logView = text("", 11, 0xFFB7C2D3, false);
+        logView = text("", 11, 0xFF465B51, false);
         logView.setTextIsSelectable(true);
         card(logView, 0, 8);
         refreshLog();
         setContentView(scroll);
     }
 
+    private void sectionTitle(String title, String subtitle) {
+        add(text(title, 17, 0xFF173B2D, true), 0, 2);
+        add(text(subtitle, 12, 0xFF71837A, false), 0, 8);
+    }
     private void requestStartupPermissions() {
         if (!hasLocationPermission()) {
             new AlertDialog.Builder(this)
@@ -291,6 +352,16 @@ public class MainActivity extends Activity {
         final File apk = pendingApk;
         pendingApk = null;
         getPreferences(MODE_PRIVATE).edit().remove(PENDING_APK).apply();
+            boolean saved = prefs.edit()
+                .putBoolean(RESTORE_AUTO_AFTER_UPDATE, prefs.getBoolean(AUTO, false))
+                .putLong(RESTORE_AUTO_TIMESTAMP, System.currentTimeMillis())
+                .commit();
+        if (!saved) {
+            pendingApk = apk;
+            getPreferences(MODE_PRIVATE).edit().putString(PENDING_APK, apk.getAbsolutePath()).apply();
+            Toast.makeText(this, "Не удалось сохранить состояние мониторинга; установка отложена", Toast.LENGTH_LONG).show();
+            return;
+        }
         new Thread(() -> {
             int sessionId = -1;
             try {
@@ -314,6 +385,7 @@ public class MainActivity extends Activity {
                 appendLog(this, "Передал обновление установщику Android; требуется подтвердить установку");
             } catch (Exception e) {
                 if (sessionId >= 0) try { getPackageManager().getPackageInstaller().abandonSession(sessionId); } catch (Exception ignored) {}
+                prefs.edit().remove(RESTORE_AUTO_AFTER_UPDATE).remove(RESTORE_AUTO_TIMESTAMP).apply();
                 appendLog(this, "Ошибка запуска установщика: " + e.getMessage());
                 runOnUiThread(() -> Toast.makeText(this, "Не удалось запустить установку: " + e.getMessage(), Toast.LENGTH_LONG).show());
             }
@@ -447,7 +519,17 @@ public class MainActivity extends Activity {
 
     private void refreshCurrent() {
         currentSsid = readCurrentSsid();
-        if (currentLabel != null) currentLabel.setText("Сейчас подключено: " + (currentSsid == null ? "не определено" : currentSsid));
+        if (currentLabel != null) {
+            boolean connected = hasConnectedWifi();
+            currentLabel.setText(currentSsid != null ? currentSsid : connected ? "Имя сети недоступно" : "Wi-Fi отключён");
+            String hint;
+            if (currentSsid == null && connected) hint = "Разреши доступ к местоположению, чтобы читать имя сети";
+            else if (currentSsid == null) hint = "На мобильной сети правило по умолчанию — включить VPN";
+            else if ("white".equals(getMode(currentSsid))) hint = "Доверенная сеть · VPN выключается";
+            else if ("black".equals(getMode(currentSsid))) hint = "Для этой сети выбрано включение VPN";
+            else hint = "Для этой сети правило ещё не задано";
+            if (currentHint != null) currentHint.setText(hint);
+        }
         renderNetworks();
     }
 
@@ -505,24 +587,30 @@ public class MainActivity extends Activity {
             addNetworkCard(ssid);
         }
         networkRows.setVisibility(shown == 0 ? View.GONE : View.VISIBLE);
+        if (networkEmpty != null) {
+            networkEmpty.setVisibility(shown == 0 ? View.VISIBLE : View.GONE);
+            if (shown == 0) networkEmpty.setText(all.isEmpty()
+                    ? "Список пока пуст. Добавь текущую или введи сохранённую сеть вручную."
+                    : "По запросу «" + search.getText().toString().trim() + "» ничего не найдено. Измени запрос.");
+        }
     }
 
     private void addNetworkCard(String ssid) {
         LinearLayout card = new LinearLayout(this);
         card.setOrientation(LinearLayout.VERTICAL);
         card.setPadding(dp(12), dp(10), dp(12), dp(10));
-        card.setBackground(round(0xFF202D40, 13));
+        card.setBackground(surfaceBackground());
 
         LinearLayout heading = new LinearLayout(this);
         heading.setOrientation(LinearLayout.HORIZONTAL);
         heading.setGravity(Gravity.CENTER_VERTICAL);
-        TextView name = text(ssid, 14, 0xFFFFFFFF, true);
+        TextView name = text(ssid, 15, 0xFF173B2D, true);
         heading.addView(name, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1));
         if (ssid.equals(currentSsid)) {
-            TextView current = text("ПОДКЛЮЧЕНО", 9, 0xFF8FE0B0, true);
+            TextView current = text("СЕЙЧАС", 9, 0xFF146C47, true);
             heading.addView(current);
         } else {
-            TextView saved = text("ДОБАВЛЕНА", 9, 0xFF9AA8BD, false);
+            TextView saved = text("ДОБАВЛЕНА", 9, 0xFF71837A, false);
             heading.addView(saved);
         }
         card.addView(heading);
@@ -545,8 +633,10 @@ public class MainActivity extends Activity {
         Button b = button(label);
         b.setTextSize(10);
         boolean active = value.equals(selected);
-        b.setTextColor(active ? 0xFFFFFFFF : 0xFFCBD4E2);
-        b.setBackground(round(active ? (value.equals("white") ? 0xFF267653 : value.equals("black") ? 0xFF9A5724 : 0xFF526078) : 0xFF2B3A50, 9));
+        int activeColor = "white".equals(value) ? 0xFFDDF1E4 : "black".equals(value) ? 0xFFDCEBFA : 0xFFE7ECE9;
+        int activeText = "white".equals(value) ? 0xFF176A43 : "black".equals(value) ? 0xFF225B8F : 0xFF52685E;
+        b.setTextColor(active ? activeText : 0xFF60736A);
+        b.setBackground(round(active ? activeColor : 0xFFF1F4F2, 9));
         b.setOnClickListener(v -> setMode(ssid, value));
         LinearLayout.LayoutParams p = new LinearLayout.LayoutParams(0, dp(40), 1);
         p.rightMargin = dp(4);
@@ -599,29 +689,64 @@ public class MainActivity extends Activity {
             requestNotificationPermissionIfNeeded();
             return;
         }
-        prefs.edit().putBoolean(AUTO, true).apply();
+        prefs.edit().putBoolean(AUTO, true).putBoolean(SERVICE_ALIVE, false).apply();
+        launchMonitorService();
+        updateAutomationUi();
+        Toast.makeText(this, "Мониторинг Wi-Fi запускается", Toast.LENGTH_SHORT).show();
+    }
+
+    private void launchMonitorService() {
         Intent i = new Intent(this, WifiMonitorService.class);
         if (Build.VERSION.SDK_INT >= 26) startForegroundService(i); else startService(i);
-        updateAutomationUi();
-        Toast.makeText(this, "Мониторинг Wi-Fi запущен", Toast.LENGTH_SHORT).show();
+    }
+
+    private void ensureAutomationServiceRunning() {
+        if (!prefs.getBoolean(AUTO, false) || isMonitorServiceRunning()) return;
+        try {
+            prefs.edit().putBoolean(SERVICE_ALIVE, false).apply();
+            launchMonitorService();
+            appendLog(this, "Восстанавливаю остановленный мониторинг");
+        } catch (Exception e) {
+            appendLog(this, "Не удалось восстановить мониторинг: " + e.getClass().getSimpleName());
+        }
+    }
+
+    private boolean isMonitorServiceRunning() {
+        try {
+            ActivityManager manager = (ActivityManager) getSystemService(ACTIVITY_SERVICE);
+            if (manager == null) return prefs.getBoolean(SERVICE_ALIVE, false);
+            for (ActivityManager.RunningServiceInfo running : manager.getRunningServices(Integer.MAX_VALUE)) {
+                if (WifiMonitorService.class.getName().equals(running.service.getClassName())) return true;
+            }
+            return false;
+        } catch (Exception e) {
+            return prefs.getBoolean(SERVICE_ALIVE, false);
+        }
     }
 
     private void stopAutomation() {
+        prefs.edit().putBoolean(AUTO, false).putBoolean(SERVICE_ALIVE, false).apply();
         stopService(new Intent(this, WifiMonitorService.class));
-        prefs.edit().putBoolean(AUTO, false).apply();
         updateAutomationUi();
     }
 
     private void updateAutomationUi() {
         if (automationSwitch == null) return;
         boolean enabled = prefs.getBoolean(AUTO, false);
+        boolean running = enabled && isMonitorServiceRunning();
         automationSwitch.setOnCheckedChangeListener(null);
         automationSwitch.setChecked(enabled);
         automationSwitch.setOnCheckedChangeListener((v, checked) -> {
             if (checked) startAutomation(); else stopAutomation();
         });
-        automationLabel.setText(enabled ? "Мониторинг включён" : "Мониторинг выключен");
-        automationLabel.setTextColor(enabled ? 0xFF8FE0B0 : 0xFFFFFFFF);
+        automationLabel.setText(!enabled ? "Автоматизация выключена" : running ? "Мониторинг работает" : "Запускаю мониторинг…");
+        automationLabel.setTextColor(enabled ? 0xFF146C47 : 0xFF64796F);
+        if (automationHint != null) {
+            automationHint.setText(!enabled
+                    ? "Включи, чтобы отслеживать смену сети"
+                    : running ? "Следит за Wi-Fi в фоне · проверка через 3 секунды после смены сети"
+                    : "Служба остановлена · приложение пытается её восстановить");
+        }
     }
 
     private TextView text(String value, int size, int color, boolean bold) {
@@ -632,17 +757,27 @@ public class MainActivity extends Activity {
     }
     private Button button(String value) {
         Button b = new Button(this); b.setText(value); b.setAllCaps(false); b.setTextSize(12);
-        b.setTextColor(0xFFFFFFFF); b.setBackground(round(0xFF354967, 10));
+        b.setTextColor(0xFFFFFFFF); b.setBackground(round(0xFF128255, 13));
         return b;
     }
     private GradientDrawable round(int color, int radius) {
         GradientDrawable d = new GradientDrawable(); d.setColor(color); d.setCornerRadius(dp(radius)); return d;
     }
+    private GradientDrawable surfaceBackground() {
+        GradientDrawable d = round(0xFFFFFFFF, 16);
+        d.setStroke(dp(1), 0xFFDDE8E1);
+        return d;
+    }
+    private GradientDrawable gradient(int start, int end, int radius) {
+        GradientDrawable d = new GradientDrawable(GradientDrawable.Orientation.TL_BR, new int[]{start, end});
+        d.setCornerRadius(dp(radius));
+        return d;
+    }
     private void add(View view, int top, int bottom) {
         LinearLayout.LayoutParams p = full(); p.topMargin = dp(top); p.bottomMargin = dp(bottom); root.addView(view, p);
     }
     private void card(View view, int top, int bottom) {
-        view.setPadding(dp(14), dp(14), dp(14), dp(14)); view.setBackground(round(0xFF202D40, 14)); add(view, top, bottom);
+        view.setPadding(dp(14), dp(14), dp(14), dp(14)); view.setBackground(surfaceBackground()); add(view, top, bottom);
     }
     private LinearLayout.LayoutParams full() { return new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT); }
     private int dp(int value) { return Math.round(value * getResources().getDisplayMetrics().density); }

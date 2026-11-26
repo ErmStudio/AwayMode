@@ -30,6 +30,10 @@ public class InstallStatusReceiver extends BroadcastReceiver {
         } else if (status == PackageInstaller.STATUS_SUCCESS) {
             MainActivity.appendLog(context, "Обновление AwayMode установлено");
         } else {
+            context.getSharedPreferences(MainActivity.PREFS, Context.MODE_PRIVATE).edit()
+                    .remove(MainActivity.RESTORE_AUTO_AFTER_UPDATE)
+                    .remove(MainActivity.RESTORE_AUTO_TIMESTAMP)
+                    .apply();
             MainActivity.appendLog(context, "Установка обновления не выполнена: " + status + " " + (message == null ? "" : message));
         }
     }
