@@ -1,4 +1,4 @@
-# AwayMode 0.2.7
+# AwayMode 0.2.8
 
 Android app (Java, no third-party runtime libraries) for Wi-Fi-based INCY VPN automation.
 
@@ -16,6 +16,12 @@ Android app (Java, no third-party runtime libraries) for Wi-Fi-based INCY VPN au
 
 ## Changes in 0.2.7
 - Fixed in-app update installation by closing the APK output stream before committing the Android package installer session.
+
+## Changes in 0.2.8
+- Resume monitoring automatically after an in-app update when monitoring was enabled.
+- Added scenario checks for trusted Wi-Fi, VPN-required Wi-Fi, unruled Wi-Fi, mobile data, and rule changes.
+- The event log retains up to 120 events, displays the latest 40, and can be cleared.
+- Simplified the launcher icon for better readability at small sizes.
 
 ## Android limitation
 Android does not let ordinary apps read the phone's complete saved Wi-Fi list. Add a network manually or connect to it and tap **Добавить текущую**. AwayMode keeps its configured list and rules across normal app updates.

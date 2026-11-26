@@ -27,6 +27,8 @@ jobs:
         uses: android-actions/setup-android@v3
         with:
           packages: 'platforms;android-35 build-tools;35.0.0'
+      - name: Verify Wi-Fi rule scenarios
+        run: gradle --no-daemon testReleaseUnitTest
       - name: Prepare persistent signing key
         env:
           KEYSTORE_BASE64: ${{ secrets.AWAYMODE_KEYSTORE_BASE64 }}

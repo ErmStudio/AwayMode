@@ -106,52 +106,21 @@ public class WifiMonitorService extends Service {
             return;
         }
 
-        String decision;
-        String reason;
-        boolean actionRequired;
-        boolean connect;
-        if (!wifiConnected) {
-            decision = "mobile|connect";
-            reason = previous.isEmpty()
-                    ? "Wi-Fi отключён; по правилу мобильной сети включаем INCY"
-                    : "Потеряли Wi-Fi сеть «" + previous + "»; на мобильной сети включаем INCY";
-            actionRequired = true;
-            connect = true;
-        } else if (white.contains(current)) {
-            decision = "wifi|" + current + "|disconnect";
-            reason = "Для сети «" + current + "» выбрано «Выключить VPN»";
-            actionRequired = true;
-            connect = false;
-        } else if (black.contains(current)) {
-            decision = "wifi|" + current + "|connect";
-            reason = "Для сети «" + current + "» выбрано «Включить VPN»";
-            actionRequired = true;
-            connect = true;
-        } else if (!previous.isEmpty() && white.contains(previous)) {
-            decision = "wifi|" + current + "|outside-trusted|connect";
-            reason = "Покинули доверенную сеть «" + previous + "»; включаем INCY";
-            actionRequired = true;
-            connect = true;
-        } else {
-            decision = "wifi|" + current + "|no-rule";
-            reason = "Сеть «" + current + "» без правила; VPN не меняем";
-            actionRequired = false;
-            connect = false;
-        }
+        NetworkRuleDecision target = NetworkRuleDecision.evaluate(wifiConnected, current, previous, white, black);
 
         String previousDecision = prefs.getString(LAST_DECISION, "");
-        if (decision.equals(previousDecision)) {
-            setStatus(actionRequired
+        if (target.key.equals(previousDecision)) {
+            setStatus(target.connect != null
                     ? "Состояние сети не изменилось; команда уже отправлялась, статус INCY неизвестен"
-                    : reason);
+                    : target.reason);
             return;
         }
 
-        if (actionRequired) requestVpnAction(connect, reason);
-        else setStatus(reason);
+        if (target.connect != null) requestVpnAction(target.connect, target.reason);
+        else setStatus(target.reason);
         prefs.edit()
                 .putString(LAST_SSID, wifiConnected ? current : "")
-                .putString(LAST_DECISION, decision)
+                .putString(LAST_DECISION, target.key)
                 .apply();
     }
 
@@ -244,7 +213,6 @@ public class WifiMonitorService extends Service {
         if (connectivity != null && wifiCallback != null) {
             try { connectivity.unregisterNetworkCallback(wifiCallback); } catch (Exception ignored) {}
         }
-        prefs.edit().putBoolean(MainActivity.AUTO, false).apply();
         super.onDestroy();
     }
     @Override public IBinder onBind(Intent intent) { return null; }

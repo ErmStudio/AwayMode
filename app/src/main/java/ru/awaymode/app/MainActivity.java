@@ -183,9 +183,19 @@ public class MainActivity extends Activity {
 
         TextView logTitle = text("ЖУРНАЛ СОБЫТИЙ", 15, 0xFF91A9FF, true);
         add(logTitle, 0, 8);
+        TextView logNote = text("Хранится до 120 событий, показаны последние 40.", 11, 0xFF9AA8BD, false);
+        add(logNote, 0, 8);
+        LinearLayout logActions = new LinearLayout(this);
+        logActions.setOrientation(LinearLayout.HORIZONTAL);
         Button shareLogs = button("Отправить логи разработчику");
         shareLogs.setOnClickListener(v -> confirmShareLogs());
-        add(shareLogs, 0, 8);
+        logActions.addView(shareLogs, new LinearLayout.LayoutParams(0, dp(46), 1));
+        Button clearLogs = button("Очистить");
+        clearLogs.setOnClickListener(v -> confirmClearLogs());
+        LinearLayout.LayoutParams clearParams = new LinearLayout.LayoutParams(dp(96), dp(46));
+        clearParams.leftMargin = dp(8);
+        logActions.addView(clearLogs, clearParams);
+        add(logActions, 0, 8);
         logView = text("", 11, 0xFFB7C2D3, false);
         logView.setTextIsSelectable(true);
         card(logView, 0, 8);
@@ -359,6 +369,19 @@ public class MainActivity extends Activity {
                 .show();
     }
 
+    private void confirmClearLogs() {
+        new AlertDialog.Builder(this)
+                .setTitle("Очистить журнал?")
+                .setMessage("Все сохранённые события будут удалены.")
+                .setPositiveButton("Очистить", (dialog, which) -> {
+                    prefs.edit().remove(LOG).apply();
+                    refreshLog();
+                    Toast.makeText(this, "Журнал очищен", Toast.LENGTH_SHORT).show();
+                })
+                .setNegativeButton("Отмена", null)
+                .show();
+    }
+
     private void shareLogs() {
         String logs = prefs.getString(LOG, "");
         String report = "AwayMode " + BuildConfig.VERSION_NAME
@@ -383,7 +406,7 @@ public class MainActivity extends Activity {
             if (visible.length() > 0) visible.append('\n');
             visible.append(lines[i]);
         }
-        logView.setText(visible.toString());
+        logView.setText(visible.length() == 0 ? "Журнал пуст" : visible.toString());
     }
 
     @Override protected void onDestroy() {
