@@ -196,39 +196,35 @@ public class MainActivity extends Activity {
     private void buildNetworksPage() {
         LinearLayout networkHero = new LinearLayout(this);
         networkHero.setOrientation(LinearLayout.VERTICAL);
-        networkHero.setPadding(dp(18), dp(16), dp(18), dp(16));
+        networkHero.setPadding(dp(15), dp(11), dp(15), dp(11));
         networkHero.setBackground(gradient(0xFF344C59, 0xFF526A76, 22));
         networkHero.setElevation(dp(3));
         networkHero.addView(text("ТЕКУЩЕЕ ПОДКЛЮЧЕНИЕ", 10, 0xFFC7EBD7, true));
-        currentLabel = text("Определяем сеть…", 21, 0xFFFFFFFF, true);
+        currentLabel = text("Определяем сеть…", 18, 0xFFFFFFFF, true);
         currentLabel.setMaxLines(2);
         LinearLayout.LayoutParams currentParams = full();
-        currentParams.topMargin = dp(5);
+        currentParams.topMargin = dp(2);
         networkHero.addView(currentLabel, currentParams);
-        currentHint = text("Проверяю состояние Wi-Fi", 12, 0xFFE0F4E8, false);
+        currentHint = text("Проверяю состояние Wi-Fi", 11, 0xFFE0F4E8, false);
         LinearLayout.LayoutParams hintParams = full();
         hintParams.topMargin = dp(3);
         networkHero.addView(currentHint, hintParams);
-        add(networkHero, 0, 12);
-
-        sectionTitle("СЕТИ И ПРАВИЛА", "Твои сети и действия INCY");
-        TextView note = text("Android не разрешает сторонним приложениям читать полный список сохранённых Wi-Fi. Добавь сеть вручную или подключись к ней.", 12, 0xFF64796F, false);
-        add(note, 0, 10);
+        add(networkHero, 0, 8);
 
         LinearLayout scanBar = new LinearLayout(this);
         scanBar.setOrientation(LinearLayout.HORIZONTAL);
         scanBar.setGravity(Gravity.CENTER_VERTICAL);
         Button scan = button("＋ Текущая сеть");
         scan.setOnClickListener(v -> addCurrentNetwork());
-        scanBar.addView(scan, new LinearLayout.LayoutParams(0, dp(46), 1));
+        scanBar.addView(scan, new LinearLayout.LayoutParams(0, dp(42), 1));
         Button manual = button("Добавить вручную");
         manual.setTextColor(0xFF21553E);
         manual.setBackground(round(0xFFDDEEE4, 13));
         manual.setOnClickListener(v -> askForSsid());
-        LinearLayout.LayoutParams manualParams = new LinearLayout.LayoutParams(0, dp(46), 1);
+        LinearLayout.LayoutParams manualParams = new LinearLayout.LayoutParams(0, dp(42), 1);
         manualParams.leftMargin = dp(8);
         scanBar.addView(manual, manualParams);
-        add(scanBar, 0, 10);
+        add(scanBar, 0, 7);
 
         search = new EditText(this);
         search.setSingleLine(true);
@@ -236,9 +232,9 @@ public class MainActivity extends Activity {
         search.setHintTextColor(0xFF84968D);
         search.setHint("⌕  Найти сеть");
         search.setTextSize(14);
-        search.setPadding(dp(14), dp(8), dp(14), dp(8));
+        search.setPadding(dp(13), dp(6), dp(13), dp(6));
         search.setBackground(surfaceBackground());
-        add(search, 0, 10);
+        add(search, 0, 7);
         search.addTextChangedListener(new TextWatcher() {
             public void beforeTextChanged(CharSequence s, int st, int c, int a) {}
             public void onTextChanged(CharSequence s, int st, int before, int count) { renderNetworks(); }
@@ -250,22 +246,10 @@ public class MainActivity extends Activity {
         networkEmpty = text("Список пока пуст. Добавь текущую или введи сохранённую сеть вручную.", 13, 0xFF71837A, false);
         networkEmpty.setPadding(dp(4), dp(8), dp(4), dp(12));
         add(networkEmpty, 0, 0);
-        add(networkRows, 0, 18);
-
-        LinearLayout rulesCard = new LinearLayout(this);
-        rulesCard.setOrientation(LinearLayout.VERTICAL);
-        rulesCard.setPadding(dp(15), dp(13), dp(15), dp(13));
-        rulesCard.setBackground(surfaceBackground());
-        rulesCard.addView(text("КАК РАБОТАЮТ ПРАВИЛА", 11, 0xFF146C47, true));
-        TextView rules = text("Выключить VPN — доверенная сеть. Включить VPN — сеть, где нужен туннель. Без Wi-Fi VPN включается. Не учитывать — оставить состояние как есть.", 12, 0xFF52685E, false);
-        LinearLayout.LayoutParams rulesParams = full();
-        rulesParams.topMargin = dp(5);
-        rulesCard.addView(rules, rulesParams);
-        add(rulesCard, 0, 12);
+        add(networkRows, 0, 8);
     }
 
     private void buildLogsPage() {
-        sectionTitle("ЖУРНАЛ СОБЫТИЙ", "Хранится до 120 записей · показаны последние 40");
         LinearLayout logActions = new LinearLayout(this);
         logActions.setOrientation(LinearLayout.HORIZONTAL);
         Button shareLogs = button("Поделиться логом");
@@ -286,7 +270,6 @@ public class MainActivity extends Activity {
     }
 
     private void buildSettingsPage() {
-        sectionTitle("НАСТРОЙКИ", "Автоматизация и версия приложения");
         LinearLayout autoCard = new LinearLayout(this);
         autoCard.setOrientation(LinearLayout.HORIZONTAL);
         autoCard.setGravity(Gravity.CENTER_VERTICAL);
@@ -374,10 +357,6 @@ public class MainActivity extends Activity {
         }
     }
 
-    private void sectionTitle(String title, String subtitle) {
-        add(text(title, 17, 0xFF173B2D, true), 0, 2);
-        add(text(subtitle, 12, 0xFF71837A, false), 0, 8);
-    }
     private void requestStartupPermissions() {
         if (!hasLocationPermission()) {
             new AlertDialog.Builder(this)
