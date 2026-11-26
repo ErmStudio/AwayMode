@@ -1,9 +1,12 @@
-name: Build AwayMode 0.2.4 APK
+name: Build and publish AwayMode APK
 
 on:
   workflow_dispatch:
   push:
     branches: [ main ]
+
+permissions:
+  contents: write
 
 jobs:
   build:
@@ -24,12 +27,41 @@ jobs:
         uses: android-actions/setup-android@v3
         with:
           packages: 'platforms;android-35 build-tools;35.0.0'
-      - name: Build debug APK
-        run: gradle --no-daemon assembleDebug
-      - name: Upload APK
+      - name: Prepare persistent signing key
+        env:
+          KEYSTORE_BASE64: ${{ secrets.AWAYMODE_KEYSTORE_BASE64 }}
+          KEYSTORE_PASSWORD: ${{ secrets.AWAYMODE_KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.AWAYMODE_KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.AWAYMODE_KEY_PASSWORD }}
+          ANDROID_KEYSTORE_PATH: ${{ runner.temp }}/awaymode-release.jks
+        run: |
+          if [ -z "$KEYSTORE_BASE64" ] || [ -z "$KEYSTORE_PASSWORD" ] || [ -z "$KEY_ALIAS" ] || [ -z "$KEY_PASSWORD" ]; then
+            echo "Missing signing key. Configure the four AWAYMODE_* repository secrets; see README.md."
+            exit 1
+          fi
+          printf '%s' "$KEYSTORE_BASE64" | base64 --decode > "$ANDROID_KEYSTORE_PATH"
+      - name: Build signed release APK
+        env:
+          ANDROID_KEYSTORE_PATH: ${{ runner.temp }}/awaymode-release.jks
+          AWAYMODE_KEYSTORE_PASSWORD: ${{ secrets.AWAYMODE_KEYSTORE_PASSWORD }}
+          AWAYMODE_KEY_ALIAS: ${{ secrets.AWAYMODE_KEY_ALIAS }}
+          AWAYMODE_KEY_PASSWORD: ${{ secrets.AWAYMODE_KEY_PASSWORD }}
+        run: gradle --no-daemon assembleRelease
+      - name: Publish APK to GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          VERSION=$(sed -n "s/.*versionName '\\(.*\\)'/\\1/p" app/build.gradle)
+          APK="awaymode-${VERSION}.apk"
+          cp app/build/outputs/apk/release/app-release.apk "$APK"
+          if ! gh release view "$VERSION" >/dev/null 2>&1; then
+            gh release create "$VERSION" --title "AwayMode $VERSION" --notes "AwayMode Android update. Install through the in-app updater or download the APK asset."
+          fi
+          gh release upload "$VERSION" "$APK" --clobber
+      - name: Upload APK artifact
         uses: actions/upload-artifact@v4
         with:
-          name: awaymode-0.2.4-debug-apk
-          path: app/build/outputs/apk/debug/app-debug.apk
+          name: awaymode-release-apk
+          path: awaymode-*.apk
           if-no-files-found: error
           retention-days: 14

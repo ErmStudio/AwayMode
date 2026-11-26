@@ -41,7 +41,8 @@ public class WifiMonitorService extends Service {
         prefs = getSharedPreferences(MainActivity.PREFS, MODE_PRIVATE);
         connectivity = (ConnectivityManager) getSystemService(CONNECTIVITY_SERVICE);
         createChannel();
-        startForeground(NOTIFICATION_ID, buildNotification("Мониторинг Wi-Fi запущен"));
+        startForeground(NOTIFICATION_ID, buildNotification("Мониторинг Wi-Fi запущен · " + BuildConfig.VERSION_NAME));
+        MainActivity.appendLog(this, "Мониторинг запущен, версия " + BuildConfig.VERSION_NAME);
         registerNetworkCallback();
         scheduleEvaluation(3000);
     }
@@ -112,9 +113,9 @@ public class WifiMonitorService extends Service {
         }
 
         if (white.contains(current)) {
-            requestVpnAction(false, "Доверенная сеть «" + current + "»: отключаем INCY");
+            requestVpnAction(false, "Для сети «" + current + "» выбрано «Выключить VPN»");
         } else if (black.contains(current)) {
-            requestVpnAction(true, "Сеть «" + current + "» в чёрном списке: включаем INCY");
+            requestVpnAction(true, "Для сети «" + current + "» выбрано «Включить VPN»");
         } else if (!previous.isEmpty() && white.contains(previous)) {
             requestVpnAction(true, "Покинули доверенную сеть; после 3 секунд проверки включаем INCY");
         } else {
@@ -153,10 +154,12 @@ public class WifiMonitorService extends Service {
         lastConnectRequested = connect;
         String previousAction = prefs.getString(LAST_ACTION, "");
         if (action.equals(previousAction)) {
+            MainActivity.appendLog(this, "Команда incy://" + action + " пропущена: такую уже отправляли ранее; факт состояния INCY неизвестен");
             setStatus(reason + " (команда уже отправлялась)");
             return;
         }
         String uri = connect ? "incy://connect" : "incy://disconnect";
+        MainActivity.appendLog(this, "Отправляю " + uri + ". Причина: " + reason);
         try {
             Intent intent = new Intent(Intent.ACTION_VIEW, Uri.parse(uri));
             intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
@@ -171,7 +174,12 @@ public class WifiMonitorService extends Service {
         updateNotification();
     }
 
-    private void setStatus(String value) { statusText = value; updateNotification(); }
+    private void setStatus(String value) {
+        if (value.equals(statusText)) return;
+        statusText = value;
+        MainActivity.appendLog(this, value);
+        updateNotification();
+    }
 
     private void createChannel() {
         if (Build.VERSION.SDK_INT >= 26) {
@@ -190,7 +198,7 @@ public class WifiMonitorService extends Service {
         PendingIntent action = PendingIntent.getActivity(this, 2, openIncy, PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE);
         Notification.Builder b = Build.VERSION.SDK_INT >= 26 ? new Notification.Builder(this, CHANNEL) : new Notification.Builder(this);
         b.setSmallIcon(android.R.drawable.ic_dialog_info)
-                .setContentTitle("AwayMode работает")
+                .setContentTitle("AwayMode " + BuildConfig.VERSION_NAME + " работает")
                 .setContentText(text)
                 .setStyle(new Notification.BigTextStyle().bigText(text + "\n" + statusText))
                 .setContentIntent(content).setOngoing(true)

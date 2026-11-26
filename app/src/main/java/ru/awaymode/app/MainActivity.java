@@ -3,10 +3,13 @@ package ru.awaymode.app;
 import android.Manifest;
 import android.app.Activity;
 import android.app.AlertDialog;
+import android.app.PendingIntent;
 import android.content.Context;
 import android.content.Intent;
 import android.content.SharedPreferences;
 import android.content.pm.PackageManager;
+import android.content.pm.PackageInstaller;
+import android.net.Uri;
 import android.net.ConnectivityManager;
 import android.net.Network;
 import android.net.NetworkCapabilities;
@@ -31,7 +34,20 @@ import android.widget.Switch;
 import android.widget.TextView;
 import android.widget.Toast;
 
+import org.json.JSONArray;
+import org.json.JSONObject;
+
+import java.io.File;
+import java.io.FileInputStream;
+import java.io.FileOutputStream;
+import java.io.InputStream;
+import java.io.OutputStream;
+import java.net.HttpURLConnection;
+import java.net.URL;
+import java.text.SimpleDateFormat;
 import java.util.Collections;
+import java.util.Date;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
 import java.util.TreeSet;
@@ -42,6 +58,8 @@ public class MainActivity extends Activity {
     static final String BLACK = "black_ssids";
     static final String KNOWN = "known_ssids";
     static final String AUTO = "automation_enabled";
+    static final String LOG = "event_log";
+    private static final String PENDING_APK = "pending_update_apk";
     private static final int REQ_LOCATION = 101;
     private static final int REQ_NOTIFICATIONS = 102;
     private final Handler handler = new Handler(Looper.getMainLooper());
@@ -49,13 +67,18 @@ public class MainActivity extends Activity {
     private WifiManager wifi;
     private LinearLayout root, networkRows;
     private EditText search;
-    private TextView currentLabel, scanLabel, automationLabel;
+    private TextView currentLabel, automationLabel, logView;
     private Switch automationSwitch;
     private String currentSsid;
+    private File pendingApk;
+    private final SharedPreferences.OnSharedPreferenceChangeListener logListener = (shared, key) -> {
+        if (LOG.equals(key)) refreshLog();
+    };
 
     @Override public void onCreate(Bundle state) {
         super.onCreate(state);
         prefs = getSharedPreferences(PREFS, MODE_PRIVATE);
+        prefs.registerOnSharedPreferenceChangeListener(logListener);
         wifi = (WifiManager) getApplicationContext().getSystemService(Context.WIFI_SERVICE);
         buildUi();
         refreshCurrent();
@@ -68,6 +91,8 @@ public class MainActivity extends Activity {
         if (prefs != null) {
             refreshCurrent();
             updateAutomationUi();
+            refreshLog();
+            installPendingApkIfAllowed(false);
         }
     }
 
@@ -122,8 +147,6 @@ public class MainActivity extends Activity {
             public void afterTextChanged(Editable e) {}
         });
 
-        scanLabel = text("Сети поблизости не показываются: выбери текущую или добавь имя вручную.", 12, 0xFF9AA8BD, false);
-        add(scanLabel, 0, 10);
         networkRows = new LinearLayout(this);
         networkRows.setOrientation(LinearLayout.VERTICAL);
         add(networkRows, 0, 18);
@@ -149,10 +172,21 @@ public class MainActivity extends Activity {
         autoCard.addView(automationSwitch);
         add(autoCard, 0, 12);
 
-        TextView rules = text("Без VPN — отключить INCY. С VPN — включить INCY. Не учитывать — оставить без правила. Без Wi-Fi INCY должен быть включён; после потери Wi-Fi AwayMode проверит подключение через 3 секунды.", 12, 0xFF9AA8BD, false);
+        TextView rules = text("Выключить VPN — доверенная сеть. Включить VPN — остальные выбранные сети. Не учитывать — оставить без правила. Без Wi-Fi INCY должен быть включён; после потери Wi-Fi AwayMode проверит подключение через 3 секунды.", 12, 0xFF9AA8BD, false);
         add(rules, 0, 8);
         TextView battery = text("Для стабильной работы на Xiaomi отключи ограничения батареи для AwayMode и разреши автозапуск в настройках HyperOS.", 12, 0xFFFFD28A, false);
         add(battery, 0, 8);
+
+        Button update = button("Проверить обновление");
+        update.setOnClickListener(v -> checkForUpdate());
+        add(update, 14, 8);
+
+        TextView logTitle = text("ЖУРНАЛ СОБЫТИЙ", 15, 0xFF91A9FF, true);
+        add(logTitle, 0, 8);
+        logView = text("", 11, 0xFFB7C2D3, false);
+        logView.setTextIsSelectable(true);
+        card(logView, 0, 8);
+        refreshLog();
         setContentView(scroll);
     }
 
@@ -167,6 +201,166 @@ public class MainActivity extends Activity {
             return;
         }
         requestNotificationPermissionIfNeeded();
+    }
+
+    private void checkForUpdate() {
+        Toast.makeText(this, "Проверяю GitHub Releases…", Toast.LENGTH_SHORT).show();
+        new Thread(() -> {
+            HttpURLConnection connection = null;
+            try {
+                URL api = new URL("https://api.github.com/repos/EugeneErmakov/AwayMode/releases/latest");
+                connection = (HttpURLConnection) api.openConnection();
+                connection.setConnectTimeout(15000);
+                connection.setReadTimeout(15000);
+                connection.setRequestProperty("User-Agent", "AwayMode-Android");
+                connection.setRequestProperty("Accept", "application/vnd.github+json");
+                if (connection.getResponseCode() != HttpURLConnection.HTTP_OK) throw new IllegalStateException("GitHub HTTP " + connection.getResponseCode());
+                JSONObject release;
+                try (InputStream in = connection.getInputStream()) {
+                    release = new JSONObject(new String(readAll(in), java.nio.charset.StandardCharsets.UTF_8));
+                }
+                String tag = release.optString("tag_name", "");
+                JSONArray assets = release.optJSONArray("assets");
+                String apkUrl = null;
+                String apkName = null;
+                if (assets != null) for (int i = 0; i < assets.length(); i++) {
+                    JSONObject asset = assets.optJSONObject(i);
+                    if (asset != null && asset.optString("name", "").toLowerCase(Locale.ROOT).endsWith(".apk")) {
+                        apkName = asset.optString("name");
+                        apkUrl = asset.optString("browser_download_url");
+                        break;
+                    }
+                }
+                if (apkUrl == null || apkUrl.isEmpty()) throw new IllegalStateException("В последнем релизе нет APK");
+                if (compareVersions(tag, BuildConfig.VERSION_NAME) <= 0) {
+                    runOnUiThread(() -> Toast.makeText(this, "Установлена актуальная версия " + BuildConfig.VERSION_NAME, Toast.LENGTH_LONG).show());
+                    appendLog(this, "Обновление: актуальная версия " + BuildConfig.VERSION_NAME);
+                    return;
+                }
+                HttpURLConnection download = (HttpURLConnection) new URL(apkUrl).openConnection();
+                download.setConnectTimeout(20000);
+                download.setReadTimeout(30000);
+                download.setRequestProperty("User-Agent", "AwayMode-Android");
+                if (download.getResponseCode() != HttpURLConnection.HTTP_OK) throw new IllegalStateException("Не удалось скачать APK: HTTP " + download.getResponseCode());
+                File destination = new File(getCacheDir(), apkName.replaceAll("[^A-Za-z0-9._-]", "_"));
+                try (InputStream in = download.getInputStream(); FileOutputStream out = new FileOutputStream(destination)) {
+                    copy(in, out);
+                } finally { download.disconnect(); }
+                pendingApk = destination;
+                getPreferences(MODE_PRIVATE).edit().putString(PENDING_APK, destination.getAbsolutePath()).apply();
+                appendLog(this, "Обновление " + tag + " скачано с GitHub");
+                runOnUiThread(() -> {
+                    Toast.makeText(this, "Скачана версия " + tag, Toast.LENGTH_LONG).show();
+                    installPendingApkIfAllowed(true);
+                });
+            } catch (Exception e) {
+                appendLog(this, "Ошибка проверки обновления: " + e.getMessage());
+                runOnUiThread(() -> Toast.makeText(this, "Не удалось обновить: " + e.getMessage(), Toast.LENGTH_LONG).show());
+            } finally {
+                if (connection != null) connection.disconnect();
+            }
+        }, "AwayMode-updater").start();
+    }
+
+    private void installPendingApkIfAllowed(boolean openSettingsIfNeeded) {
+        if (pendingApk == null) {
+            String path = getPreferences(MODE_PRIVATE).getString(PENDING_APK, null);
+            if (path != null) pendingApk = new File(path);
+        }
+        if (pendingApk == null || !pendingApk.isFile()) return;
+        if (Build.VERSION.SDK_INT >= 26 && !getPackageManager().canRequestPackageInstalls()) {
+            if (!openSettingsIfNeeded) return;
+            Intent settings = new Intent(android.provider.Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES,
+                    Uri.parse("package:" + getPackageName()));
+            startActivity(settings);
+            return;
+        }
+        final File apk = pendingApk;
+        pendingApk = null;
+        getPreferences(MODE_PRIVATE).edit().remove(PENDING_APK).apply();
+        new Thread(() -> {
+            int sessionId = -1;
+            try {
+                PackageInstaller installer = getPackageManager().getPackageInstaller();
+                PackageInstaller.SessionParams params = new PackageInstaller.SessionParams(PackageInstaller.SessionParams.MODE_FULL_INSTALL);
+                params.setAppPackageName(getPackageName());
+                sessionId = installer.createSession(params);
+                try (PackageInstaller.Session session = installer.openSession(sessionId);
+                     FileInputStream in = new FileInputStream(apk);
+                     OutputStream out = session.openWrite("base.apk", 0, apk.length())) {
+                    copy(in, out);
+                    session.fsync(out);
+                    Intent callback = new Intent(this, InstallStatusReceiver.class).setAction(InstallStatusReceiver.ACTION);
+                    callback.putExtra(PackageInstaller.EXTRA_SESSION_ID, sessionId);
+                    int flags = PendingIntent.FLAG_UPDATE_CURRENT;
+                    if (Build.VERSION.SDK_INT >= 31) flags |= PendingIntent.FLAG_MUTABLE;
+                    PendingIntent pending = PendingIntent.getBroadcast(this, sessionId, callback, flags);
+                    session.commit(pending.getIntentSender());
+                }
+                appendLog(this, "Передал обновление установщику Android; требуется подтвердить установку");
+            } catch (Exception e) {
+                if (sessionId >= 0) try { getPackageManager().getPackageInstaller().abandonSession(sessionId); } catch (Exception ignored) {}
+                appendLog(this, "Ошибка запуска установщика: " + e.getMessage());
+                runOnUiThread(() -> Toast.makeText(this, "Не удалось запустить установку: " + e.getMessage(), Toast.LENGTH_LONG).show());
+            }
+        }, "AwayMode-installer").start();
+    }
+
+    private static byte[] readAll(InputStream in) throws java.io.IOException {
+        java.io.ByteArrayOutputStream out = new java.io.ByteArrayOutputStream();
+        copy(in, out);
+        return out.toByteArray();
+    }
+
+    private static void copy(InputStream in, OutputStream out) throws java.io.IOException {
+        byte[] buffer = new byte[32768];
+        int count;
+        while ((count = in.read(buffer)) != -1) out.write(buffer, 0, count);
+    }
+
+    private static int compareVersions(String first, String second) {
+        String[] a = first.replaceFirst("^[^0-9]*", "").split("\\.");
+        String[] b = second.replaceFirst("^[^0-9]*", "").split("\\.");
+        for (int i = 0; i < Math.max(a.length, b.length); i++) {
+            int x = i < a.length ? parseVersionPart(a[i]) : 0;
+            int y = i < b.length ? parseVersionPart(b[i]) : 0;
+            if (x != y) return Integer.compare(x, y);
+        }
+        return 0;
+    }
+
+    private static int parseVersionPart(String value) {
+        try { return Integer.parseInt(value.replaceAll("[^0-9].*$", "")); }
+        catch (Exception e) { return 0; }
+    }
+
+    static synchronized void appendLog(Context context, String message) {
+        SharedPreferences prefs = context.getSharedPreferences(PREFS, MODE_PRIVATE);
+        String stamp = new SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.getDefault()).format(new Date());
+        String current = prefs.getString(LOG, "");
+        String[] old = current.isEmpty() ? new String[0] : current.split("\\n");
+        StringBuilder next = new StringBuilder();
+        int start = Math.max(0, old.length - 119);
+        for (int i = start; i < old.length; i++) next.append(old[i]).append('\n');
+        next.append(stamp).append("  ").append(message.replace('\n', ' '));
+        prefs.edit().putString(LOG, next.toString()).apply();
+    }
+
+    private void refreshLog() {
+        if (logView == null) return;
+        String[] lines = prefs.getString(LOG, "").split("\\n");
+        StringBuilder visible = new StringBuilder();
+        for (int i = Math.max(0, lines.length - 40); i < lines.length; i++) {
+            if (lines[i].isEmpty()) continue;
+            if (visible.length() > 0) visible.append('\n');
+            visible.append(lines[i]);
+        }
+        logView.setText(visible.toString());
+    }
+
+    @Override protected void onDestroy() {
+        if (prefs != null) prefs.unregisterOnSharedPreferenceChangeListener(logListener);
+        super.onDestroy();
     }
 
     private void requestNotificationPermissionIfNeeded() {
@@ -197,7 +391,7 @@ public class MainActivity extends Activity {
     }
 
     private void updatePermissionHint() {
-        if (scanLabel != null) scanLabel.setText("Для определения имени подключённой Wi-Fi сети нужно разрешение на местоположение.");
+        Toast.makeText(this, "Для определения имени Wi-Fi нужно разрешение на местоположение", Toast.LENGTH_LONG).show();
     }
 
     private void refreshCurrent() {
@@ -251,18 +445,15 @@ public class MainActivity extends Activity {
         for (String ssid : prefs.getStringSet(BLACK, Collections.emptySet())) all.putIfAbsent(ssid, Boolean.TRUE);
         if (currentSsid != null) all.putIfAbsent(currentSsid, Boolean.TRUE);
 
-        String filter = search == null ? "" : search.getText().toString().trim().toLowerCase();
+        String filter = search == null ? "" : search.getText().toString().trim().toLowerCase(Locale.ROOT);
         int shown = 0;
         for (Map.Entry<String, Boolean> entry : all.entrySet()) {
             String ssid = entry.getKey();
-            if (!ssid.toLowerCase().contains(filter)) continue;
+            if (!ssid.toLowerCase(Locale.ROOT).contains(filter)) continue;
             shown++;
             addNetworkCard(ssid);
         }
-        if (shown == 0) {
-            TextView empty = text(all.isEmpty() ? "Список пуст. Подключись к сети и добавь текущую или введи имя вручную." : "По этому запросу ничего не найдено.", 13, 0xFF9AA8BD, false);
-            card(empty, 12, 8);
-        }
+        networkRows.setVisibility(shown == 0 ? View.GONE : View.VISIBLE);
     }
 
     private void addNetworkCard(String ssid) {
@@ -290,8 +481,8 @@ public class MainActivity extends Activity {
         choices.setPadding(0, dp(8), 0, 0);
         String mode = getMode(ssid);
         addModeButton(choices, ssid, "Не учитывать", "none", mode);
-        addModeButton(choices, ssid, "Без VPN", "white", mode);
-        addModeButton(choices, ssid, "С VPN", "black", mode);
+        addModeButton(choices, ssid, "Выключить VPN", "white", mode);
+        addModeButton(choices, ssid, "Включить VPN", "black", mode);
         card.addView(choices);
 
         LinearLayout.LayoutParams p = full();
@@ -326,6 +517,8 @@ public class MainActivity extends Activity {
         if ("white".equals(mode)) white.add(ssid);
         if ("black".equals(mode)) black.add(ssid);
         prefs.edit().putStringSet(KNOWN, known).putStringSet(WHITE, white).putStringSet(BLACK, black).apply();
+        String modeName = "white".equals(mode) ? "выключить VPN" : "black".equals(mode) ? "включить VPN" : "не учитывать";
+        appendLog(this, "Правило сети «" + ssid + "»: " + modeName);
         renderNetworks();
         Toast.makeText(this, "Настройка сети обновлена", Toast.LENGTH_SHORT).show();
     }
@@ -340,7 +533,7 @@ public class MainActivity extends Activity {
                 .setPositiveButton("Добавить", (d, w) -> {
                     String ssid = input.getText().toString().trim();
                     if (ssid.isEmpty()) { Toast.makeText(this, "Имя сети пустое", Toast.LENGTH_SHORT).show(); return; }
-                    setMode(ssid, "none");
+                setMode(ssid, "none");
                 }).setNegativeButton("Отмена", null).show();
     }
 

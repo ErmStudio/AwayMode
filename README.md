@@ -1,29 +1,35 @@
-# AwayMode 0.2.4
+# AwayMode 0.2.5
 
 Android app (Java, no third-party runtime libraries) for Wi-Fi-based INCY VPN automation.
 
-## What's new in 0.2.4
-- Network list shows networks explicitly added in AwayMode, networks with a selected mode, and the currently connected network; nearby scan results are not shown.
-- Quick action to add the currently connected network, plus manual SSID entry. Networks added in Ignore mode are saved and remain in the list.
-- Wi-Fi loss is detected through Android's default-network callback. After 3 seconds, AwayMode checks the active connection and requests INCY connect whenever Wi-Fi is unavailable, as required for mobile data.
-- Version code 6; existing settings are preserved on update.
+## Changes in 0.2.5
+- Network actions are labelled **Выключить VPN** and **Включить VPN**.
+- Added networks and selected rules are listed; empty search results no longer add a misleading placeholder card.
+- Added an in-app event log showing the installed app version, network decisions, INCY deep-link requests, update checks, and installation results.
+- Added **Проверить обновление**. It checks the latest public GitHub Release, downloads its APK, and opens Android's package installer. Android still asks the user to confirm installation.
+- No Wi-Fi means request INCY connect for mobile data. Unknown Wi-Fi SSIDs remain unchanged.
 
-## Android Wi-Fi limitation
-Ordinary Android apps cannot enumerate the full list of Wi-Fi networks saved by the system. Android 10+ restricts `WifiManager.getConfiguredNetworks()` for normal apps. Add a saved network to AwayMode by connecting to it and tapping **Добавить текущую**, or enter its exact SSID manually. AwayMode stores its rules between app updates.
+## Android limitation
+Android does not let ordinary apps read the phone's complete saved Wi-Fi list. Add a network manually or connect to it and tap **Добавить текущую**. AwayMode keeps its configured list and rules across normal app updates.
 
-## Automation rules
-- White list: send `incy://disconnect`.
-- Black list: send `incy://connect`.
-- Ignore/unknown network: do nothing.
-- Leaving a white-list network: wait 3 seconds, check the active network again, then request VPN connect if Wi-Fi is gone or the phone is on another network.
-- No Wi-Fi (mobile data): request INCY connect.
-- Leaving a black-list network: do nothing.
+## GitHub build and in-app updates
+Push to `main` (or run the workflow manually). GitHub Actions builds a signed APK and publishes it as a GitHub Release. In AwayMode tap **Проверить обновление** to download it. The Android installer opens for confirmation; Android does not allow a normal app to silently install APKs.
 
-Android may restrict launching INCY from a background service. Successful intent dispatch does not prove the VPN state changed; check INCY's actual status. On Xiaomi/HyperOS, allow AwayMode background activity and disable its battery restrictions.
+The release APK must always use the same signing key or Android will reject updates. Create a key once with JDK 17's `keytool` in PowerShell:
 
-## Fast local APK build
-Install Android Studio once and open this project. Let Gradle sync, then select **Build → Build Bundle(s) / APK(s) → Build APK(s)**. Android Studio shows a notification with **Locate** when the APK is ready. The debug APK is at `app/build/outputs/apk/debug/app-debug.apk`. Copy it to the phone and install it; future builds from this computer can update that app while keeping its settings. No GitHub upload or download is needed.
+```powershell
+keytool -genkeypair -v -keystore "$env:USERPROFILE\awaymode-release.jks" -storetype JKS -alias awaymode -keyalg RSA -keysize 2048 -validity 10000
+[Convert]::ToBase64String([IO.File]::ReadAllBytes("$env:USERPROFILE\awaymode-release.jks")) | Set-Clipboard
+```
 
-The first local install may conflict with a copy installed from GitHub Actions because Actions signs debug APKs with a different key. Uninstall the old copy once before installing the first local build. After that, local debug APKs from this computer use the same debug signing key and install as updates. The project itself is small; Android Studio and Android SDK are the one-time setup.
+Keep the keystore and passwords backed up securely. In the GitHub repository, open **Settings → Secrets and variables → Actions** and create these repository secrets:
 
-GitHub Actions remains available: run **Actions → Build AwayMode 0.2.4 APK → Run workflow** and download artifact `awaymode-0.2.4-debug-apk`. Actions debug APKs may not update each other because the signing key is temporary.
+- `AWAYMODE_KEYSTORE_BASE64` — paste the Base64 value copied by the command above.
+- `AWAYMODE_KEYSTORE_PASSWORD` — the keystore password.
+- `AWAYMODE_KEY_ALIAS` — `awaymode`.
+- `AWAYMODE_KEY_PASSWORD` — the key password.
+
+The workflow fails with a clear message until these secrets are configured. Since older APKs were signed with temporary GitHub debug keys, the first install of the new stable-signature release requires uninstalling the old app once. Android removes app data on uninstall, so re-enter the network rules after that one-time migration. Future releases can update over the installed app and retain its settings.
+
+## Build without Android Studio
+Android Studio is optional. Local builds need JDK 17, Gradle 8.9, Android SDK platform 35 and Build Tools 35.0.0. GitHub Actions already installs these tools, so the usual flow needs no local Android SDK or APK download.
