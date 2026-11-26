@@ -1,4 +1,4 @@
-name: Build AwayMode 0.2.3 APK
+name: Build AwayMode 0.2.4 APK
 
 on:
   workflow_dispatch:
@@ -29,7 +29,7 @@ jobs:
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
-          name: awaymode-0.2.3-debug-apk
+          name: awaymode-0.2.4-debug-apk
           path: app/build/outputs/apk/debug/app-debug.apk
           if-no-files-found: error
           retention-days: 14

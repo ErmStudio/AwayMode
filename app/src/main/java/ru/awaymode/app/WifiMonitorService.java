@@ -12,6 +12,7 @@ import android.content.pm.PackageManager;
 import android.net.ConnectivityManager;
 import android.net.Network;
 import android.net.NetworkCapabilities;
+import android.net.NetworkRequest;
 import android.net.Uri;
 import android.net.wifi.WifiInfo;
 import android.net.wifi.WifiManager;
@@ -30,6 +31,7 @@ public class WifiMonitorService extends Service {
     private final Handler handler = new Handler(Looper.getMainLooper());
     private ConnectivityManager connectivity;
     private ConnectivityManager.NetworkCallback callback;
+    private ConnectivityManager.NetworkCallback wifiCallback;
     private SharedPreferences prefs;
     private String statusText = "Ожидание изменения Wi-Fi";
     private boolean lastConnectRequested = true;
@@ -67,6 +69,18 @@ public class WifiMonitorService extends Service {
         } catch (Exception e) {
             setStatus("Не удалось включить мониторинг: " + e.getClass().getSimpleName());
         }
+        wifiCallback = new ConnectivityManager.NetworkCallback() {
+            @Override public void onAvailable(Network network) { scheduleEvaluation(3000); }
+            @Override public void onLost(Network network) { scheduleEvaluation(3000); }
+            @Override public void onCapabilitiesChanged(Network network, NetworkCapabilities caps) { scheduleEvaluation(3000); }
+        };
+        try {
+            NetworkRequest request = new NetworkRequest.Builder()
+                    .addTransportType(NetworkCapabilities.TRANSPORT_WIFI).build();
+            connectivity.registerNetworkCallback(request, wifiCallback);
+        } catch (Exception e) {
+            setStatus("Не удалось отслеживать Wi-Fi: " + e.getClass().getSimpleName());
+        }
     }
 
     private void scheduleEvaluation(long delayMs) {
@@ -76,7 +90,7 @@ public class WifiMonitorService extends Service {
     private final Runnable evaluateRunnable = this::evaluateNetwork;
 
     private void evaluateNetwork() {
-        String current = readSsid();
+        String current = isWifiConnected() ? readSsid() : null;
         String previous = prefs.getString(LAST_SSID, "");
         Set<String> white = prefs.getStringSet(MainActivity.WHITE, Collections.emptySet());
         Set<String> black = prefs.getStringSet(MainActivity.BLACK, Collections.emptySet());
@@ -84,11 +98,10 @@ public class WifiMonitorService extends Service {
         if (current == null) {
             if (isWifiConnected()) {
                 setStatus("Wi-Fi подключён, но имя сети недоступно; VPN не трогаем");
-            } else if (!previous.isEmpty() && white.contains(previous)) {
-                requestVpnAction(true, "Потеряли доверенную сеть «" + previous + "»: включаем INCY");
-                prefs.edit().putString(LAST_SSID, "").apply();
             } else {
-                setStatus("Wi-Fi отключён; правило не требует действий");
+                requestVpnAction(true, previous.isEmpty()
+                        ? "Wi-Fi отключён; на мобильном интернете включаем INCY"
+                        : "Потеряли Wi-Fi сеть «" + previous + "»; на мобильном интернете включаем INCY");
                 prefs.edit().putString(LAST_SSID, "").apply();
             }
             return;
@@ -112,9 +125,12 @@ public class WifiMonitorService extends Service {
 
     private boolean isWifiConnected() {
         try {
-            Network active = connectivity == null ? null : connectivity.getActiveNetwork();
-            NetworkCapabilities caps = active == null ? null : connectivity.getNetworkCapabilities(active);
-            return caps != null && caps.hasTransport(NetworkCapabilities.TRANSPORT_WIFI);
+            if (connectivity == null) return false;
+            for (Network network : connectivity.getAllNetworks()) {
+                NetworkCapabilities caps = connectivity.getNetworkCapabilities(network);
+                if (caps != null && caps.hasTransport(NetworkCapabilities.TRANSPORT_WIFI)) return true;
+            }
+            return false;
         } catch (Exception e) { return false; }
     }
 
@@ -191,6 +207,9 @@ public class WifiMonitorService extends Service {
         handler.removeCallbacksAndMessages(null);
         if (connectivity != null && callback != null) {
             try { connectivity.unregisterNetworkCallback(callback); } catch (Exception ignored) {}
+        }
+        if (connectivity != null && wifiCallback != null) {
+            try { connectivity.unregisterNetworkCallback(wifiCallback); } catch (Exception ignored) {}
         }
         prefs.edit().putBoolean(MainActivity.AUTO, false).apply();
         super.onDestroy();

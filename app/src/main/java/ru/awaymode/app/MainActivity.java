@@ -7,6 +7,9 @@ import android.content.Context;
 import android.content.Intent;
 import android.content.SharedPreferences;
 import android.content.pm.PackageManager;
+import android.net.ConnectivityManager;
+import android.net.Network;
+import android.net.NetworkCapabilities;
 import android.net.wifi.WifiInfo;
 import android.net.wifi.WifiManager;
 import android.os.Build;
@@ -37,6 +40,7 @@ public class MainActivity extends Activity {
     static final String PREFS = "awaymode_rules";
     static final String WHITE = "white_ssids";
     static final String BLACK = "black_ssids";
+    static final String KNOWN = "known_ssids";
     static final String AUTO = "automation_enabled";
     private static final int REQ_LOCATION = 101;
     private static final int REQ_NOTIFICATIONS = 102;
@@ -87,7 +91,7 @@ public class MainActivity extends Activity {
 
         TextView section = text("СЕТИ WI-FI", 15, 0xFF91A9FF, true);
         add(section, 0, 6);
-        TextView note = text("Выбирай режим прямо у каждой сети. В списке — сети рядом и уже добавленные тобой. Полный список сохранённых Android-сетей система сторонним приложениям не открывает.", 12, 0xFF9AA8BD, false);
+        TextView note = text("Здесь отображаются сети, добавленные в AwayMode, и текущая сеть. Полный список сохранённых Wi-Fi сетей Android сторонним приложениям не открывает. Добавь сеть вручную или подключись к ней и нажми «Добавить текущую».", 12, 0xFF9AA8BD, false);
         add(note, 0, 12);
 
         LinearLayout scanBar = new LinearLayout(this);
@@ -145,7 +149,7 @@ public class MainActivity extends Activity {
         autoCard.addView(automationSwitch);
         add(autoCard, 0, 12);
 
-        TextView rules = text("Белый список — отключить INCY. Чёрный список — включить INCY. Не учитывать — ничего не менять. При уходе из белой сети VPN включается через 3 секунды после проверки подключения.", 12, 0xFF9AA8BD, false);
+        TextView rules = text("Без VPN — отключить INCY. С VPN — включить INCY. Не учитывать — оставить без правила. Без Wi-Fi INCY должен быть включён; после потери Wi-Fi AwayMode проверит подключение через 3 секунды.", 12, 0xFF9AA8BD, false);
         add(rules, 0, 8);
         TextView battery = text("Для стабильной работы на Xiaomi отключи ограничения батареи для AwayMode и разреши автозапуск в настройках HyperOS.", 12, 0xFFFFD28A, false);
         add(battery, 0, 8);
@@ -203,12 +207,24 @@ public class MainActivity extends Activity {
     }
 
     private String readCurrentSsid() {
-        if (!hasLocationPermission() || wifi == null) return null;
+        if (!hasLocationPermission() || wifi == null || !hasConnectedWifi()) return null;
         try {
             WifiInfo info = wifi.getConnectionInfo();
             if (info == null) return null;
             return cleanSsid(info.getSSID());
         } catch (Exception e) { return null; }
+    }
+
+    private boolean hasConnectedWifi() {
+        try {
+            ConnectivityManager cm = (ConnectivityManager) getSystemService(CONNECTIVITY_SERVICE);
+            if (cm == null) return false;
+            for (Network network : cm.getAllNetworks()) {
+                NetworkCapabilities caps = cm.getNetworkCapabilities(network);
+                if (caps != null && caps.hasTransport(NetworkCapabilities.TRANSPORT_WIFI)) return true;
+            }
+        } catch (Exception ignored) {}
+        return false;
     }
 
     private String cleanSsid(String raw) {
@@ -230,6 +246,7 @@ public class MainActivity extends Activity {
         if (networkRows == null) return;
         networkRows.removeAllViews();
         Map<String, Boolean> all = new java.util.TreeMap<>(String.CASE_INSENSITIVE_ORDER);
+        for (String ssid : prefs.getStringSet(KNOWN, Collections.emptySet())) all.putIfAbsent(ssid, Boolean.TRUE);
         for (String ssid : prefs.getStringSet(WHITE, Collections.emptySet())) all.putIfAbsent(ssid, Boolean.TRUE);
         for (String ssid : prefs.getStringSet(BLACK, Collections.emptySet())) all.putIfAbsent(ssid, Boolean.TRUE);
         if (currentSsid != null) all.putIfAbsent(currentSsid, Boolean.TRUE);
@@ -303,10 +320,12 @@ public class MainActivity extends Activity {
     private void setMode(String ssid, String mode) {
         Set<String> white = new TreeSet<>(prefs.getStringSet(WHITE, Collections.emptySet()));
         Set<String> black = new TreeSet<>(prefs.getStringSet(BLACK, Collections.emptySet()));
+        Set<String> known = new TreeSet<>(prefs.getStringSet(KNOWN, Collections.emptySet()));
+        known.add(ssid);
         white.remove(ssid); black.remove(ssid);
         if ("white".equals(mode)) white.add(ssid);
         if ("black".equals(mode)) black.add(ssid);
-        prefs.edit().putStringSet(WHITE, white).putStringSet(BLACK, black).apply();
+        prefs.edit().putStringSet(KNOWN, known).putStringSet(WHITE, white).putStringSet(BLACK, black).apply();
         renderNetworks();
         Toast.makeText(this, "Настройка сети обновлена", Toast.LENGTH_SHORT).show();
     }
