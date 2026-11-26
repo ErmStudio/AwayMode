@@ -1,4 +1,4 @@
-﻿package ru.awaymode.app;
+package ru.awaymode.app;
 
 import android.Manifest;
 import android.app.ActivityManager;
