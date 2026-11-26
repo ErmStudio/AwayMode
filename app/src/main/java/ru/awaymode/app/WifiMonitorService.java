@@ -20,7 +20,6 @@ import android.os.Build;
 import android.os.Handler;
 import android.os.IBinder;
 import android.os.Looper;
-
 import java.util.Collections;
 import java.util.Set;
 
@@ -35,7 +34,7 @@ public class WifiMonitorService extends Service {
     private SharedPreferences prefs;
     private String statusText = "Ожидание изменения Wi-Fi";
     private boolean lastConnectRequested = true;
-    private volatile boolean wifiLossPending = false;
+    private boolean wifiLossPending = false;
 
     @Override public void onCreate() {
         super.onCreate();
@@ -44,7 +43,6 @@ public class WifiMonitorService extends Service {
         createChannel();
         startForeground(NOTIFICATION_ID, buildNotification("Мониторинг Wi-Fi запущен"));
         registerNetworkCallback();
-        // Проверяем текущую сеть после старта, когда Android уже поднял foreground service.
         scheduleEvaluation(1500);
     }
 
@@ -57,12 +55,10 @@ public class WifiMonitorService extends Service {
         if (connectivity == null) { setStatus("Не удалось получить ConnectivityManager"); return; }
         callback = new ConnectivityManager.NetworkCallback() {
             @Override public void onAvailable(Network network) {
-                // Появился именно Wi-Fi. Это также сбрасывает ожидание потери старой сети.
                 wifiLossPending = false;
                 scheduleEvaluation(2000);
             }
             @Override public void onLost(Network network) {
-                // Не включаем VPN немедленно: Android может тут же подключить другой Wi-Fi.
                 wifiLossPending = true;
                 scheduleEvaluation(12000);
             }
@@ -72,8 +68,7 @@ public class WifiMonitorService extends Service {
         };
         try {
             NetworkRequest request = new NetworkRequest.Builder()
-                    .addTransportType(NetworkCapabilities.TRANSPORT_WIFI)
-                    .build();
+                    .addTransportType(NetworkCapabilities.TRANSPORT_WIFI).build();
             connectivity.registerNetworkCallback(request, callback);
         } catch (Exception e) {
             setStatus("Не удалось включить мониторинг: " + e.getClass().getSimpleName());
@@ -84,32 +79,24 @@ public class WifiMonitorService extends Service {
         handler.removeCallbacks(evaluateRunnable);
         handler.postDelayed(evaluateRunnable, delayMs);
     }
-
     private final Runnable evaluateRunnable = this::evaluateNetwork;
 
     private void evaluateNetwork() {
         String current = readSsid();
         String previous = prefs.getString(LAST_SSID, "");
         Set<String> white = prefs.getStringSet(MainActivity.WHITE, Collections.emptySet());
-        Set<String> black = prefs.getStringSet(MainActivity.BLACK, Collections.emptySet());
+        Set<String> black = prefs.getString(MainActivity.BLACK, Collections.emptySet());
 
-        // Пустой SSID сам по себе ничего не доказывает: Android может временно скрыть
-        // имя сети. Считаем это отключением только после события onLost именно Wi-Fi.
         if (current == null) {
             if (wifiLossPending) {
                 wifiLossPending = false;
                 if (!previous.isEmpty() && white.contains(previous)) {
-                    requestVpnAction(true, "Потеряна доверенная сеть «" + previous + "»: включаем INCY");
-                } else {
-                    setStatus("Wi-Fi отключён; правило для этой сети не требует действий");
-                }
+                    requestVpnAction(true, "Покинули доверенную сеть «" + previous + "»: включаем INCY");
+                } else setStatus("Wi-Fi отключён; правило не требует действий");
                 prefs.edit().putString(LAST_SSID, "").apply();
-            } else {
-                setStatus("Имя Wi-Fi временно недоступно; состояние VPN не меняем");
-            }
+            } else setStatus("Имя Wi-Fi временно недоступно; VPN не трогаем");
             return;
         }
-
         wifiLossPending = false;
         if (current.equals(previous)) {
             setStatus("Сеть «" + current + "» без изменений; VPN не трогаем");
@@ -121,7 +108,18 @@ public class WifiMonitorService extends Service {
         } else if (black.contains(current)) {
             requestVpnAction(true, "Сеть «" + current + "» в чёрном списке: включаем INCY");
         } else if (!previous.isEmpty() && white.contains(previous)) {
-            requestVpnAction(true, "Покинули доверенную сеть «" + previous + "»: включаем INCY");
+            final String expectedCurrent = current;
+            setStatus("Покинули доверенную сеть; включим INCY через 12 секунд, если сеть не изменится");
+            handler.postDelayed(() -> {
+                String now = readSsid();
+                Set<String> latestWhite = prefs.getStringSet(MainActivity.WHITE, Collections.emptySet());
+                Set<String> latestBlack = prefs.getStringSet(MainActivity.BLACK, Collections.emptySet());
+                if (expectedCurrent.equals(now) && !latestWhite.contains(now)) {
+                    requestVpnAction(true, "Остались вне доверенной сети: включаем INCY");
+                } else if (now != null && latestWhite.contains(now)) {
+                    requestVpnAction(false, "Вернулись в доверенную сеть: отключаем INCY");
+                } else setStatus("Сеть изменилась во время ожидания; VPN не трогаем");
+            }, 12000);
         } else {
             setStatus("Неизвестная сеть «" + current + "»: состояние VPN не меняем");
         }
@@ -137,7 +135,7 @@ public class WifiMonitorService extends Service {
             if (info == null) return null;
             String ssid = info.getSSID();
             if (ssid == null || ssid.equals(WifiManager.UNKNOWN_SSID) || ssid.equals("<unknown ssid>")) return null;
-            if (ssid.length() >= 2 && ssid.startsWith("\"") && ssid.endsWith("\"")) ssid = ssid.substring(1, ssid.length()-1);
+            if (ssid.length() >= 2 && ssid.startsWith("\"") && ssid.endsWith("\"")) ssid = ssid.substring(1, ssid.length() - 1);
             return ssid;
         } catch (Exception e) { return null; }
     }
@@ -160,20 +158,17 @@ public class WifiMonitorService extends Service {
         } catch (ActivityNotFoundException e) {
             setStatus("Не найден обработчик " + uri + ". Проверь установку INCY.");
         } catch (Exception e) {
-            setStatus("Android не разрешил запуск INCY из фона: " + e.getClass().getSimpleName() + ". Можно нажать действие в уведомлении.");
+            setStatus("Android не разрешил запуск INCY из фона: " + e.getClass().getSimpleName() + ". Используй кнопку в уведомлении.");
         }
         updateNotification();
     }
 
-    private void setStatus(String value) {
-        statusText = value;
-        updateNotification();
-    }
+    private void setStatus(String value) { statusText = value; updateNotification(); }
 
     private void createChannel() {
         if (Build.VERSION.SDK_INT >= 26) {
             NotificationChannel channel = new NotificationChannel(CHANNEL, "AwayMode — автоматизация", NotificationManager.IMPORTANCE_LOW);
-            channel.setDescription("Показывает состояние фонового мониторинга Wi-Fi");
+            channel.setDescription("Состояние фонового мониторинга Wi-Fi");
             NotificationManager nm = getSystemService(NotificationManager.class);
             if (nm != null) nm.createNotificationChannel(channel);
         }
@@ -190,8 +185,7 @@ public class WifiMonitorService extends Service {
                 .setContentTitle("AwayMode работает")
                 .setContentText(text)
                 .setStyle(new Notification.BigTextStyle().bigText(text + "\n" + statusText))
-                .setContentIntent(content)
-                .setOngoing(true)
+                .setContentIntent(content).setOngoing(true)
                 .addAction(new Notification.Action.Builder(0, "Открыть INCY", action).build());
         return b.build();
     }
@@ -209,6 +203,5 @@ public class WifiMonitorService extends Service {
         prefs.edit().putBoolean(MainActivity.AUTO, false).apply();
         super.onDestroy();
     }
-
     @Override public IBinder onBind(Intent intent) { return null; }
 }

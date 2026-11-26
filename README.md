@@ -1,37 +1,28 @@
-# AwayMode 0.2-test — Wi-Fi automation test
+# AwayMode 0.2.2
 
-Android app (Java, no third-party runtime libraries) for testing Wi-Fi-based INCY VPN automation.
+Android app (Java, no third-party runtime libraries) for Wi-Fi-based INCY VPN automation.
 
-## Rules implemented
+## What's new in 0.2.2
+- One searchable network list combining nearby scan results, the currently connected network, and networks already configured in AwayMode.
+- Each network has a three-way selector: Ignore / VPN off (white list) / VPN on (black list).
+- Moving a network to one mode automatically removes it from the other mode.
+- Wi-Fi scan refresh and manual SSID entry.
+- Location and notification permissions are explained and requested on first launch.
+- Automation is controlled by one switch.
 
-- Wi-Fi in the **white list**: send `incy://disconnect`.
-- Wi-Fi in the **black list**: send `incy://connect`.
-- Unknown Wi-Fi: do nothing, except when just leaving a white-list network.
-- Leaving a white-list Wi-Fi (to mobile data, no Wi-Fi, or an unknown Wi-Fi): wait 12 seconds, then send `incy://connect`.
-- Leaving a black-list Wi-Fi: do nothing.
-- A network cannot be in both lists; adding it to one removes it from the other.
-- Lists are stored locally in app preferences. Android does not let ordinary apps enumerate the full saved Wi-Fi network list, so add the currently connected network or type an SSID manually.
+## Important Android limitation
+Ordinary Android apps cannot enumerate the full list of Wi-Fi networks saved by the system. Android 10+ returns an empty list from `WifiManager.getConfiguredNetworks()` for normal apps. AwayMode therefore shows networks visible in a nearby scan, the current connection, and networks already saved inside AwayMode. A saved network that is not nearby remains in the AwayMode list.
 
-## Important test limitations
+Wi-Fi scan results require location permission and, depending on Android/HyperOS, the phone's system Location setting to be enabled. Android may throttle scans and return cached results.
 
-This is a **background-behaviour proof of concept**, not a claim that every Android/HyperOS version will allow fully silent VPN switching. Android restricts launching another app's Activity from the background. AwayMode runs a foreground service and attempts the documented INCY deep link; the service notification also contains an **Open INCY** action as a user-tap fallback. A successful `startActivity()` call means Android accepted the intent, not that INCY definitely changed VPN state. Verify the actual VPN state during testing.
+## Automation rules
+- White list: send `incy://disconnect`.
+- Black list: send `incy://connect`.
+- Ignore/unknown network: do nothing.
+- Leaving a white-list network: wait 12 seconds and re-check the current network before requesting VPN connect.
+- Leaving a black-list network: do nothing.
 
-The service is started manually from the app in this test build. Automatic restart after phone reboot, advanced Xiaomi autostart handling, and a reliable in-app readback of INCY state are not implemented yet.
+## Build
+Push the project contents to the root of the GitHub repository, including `.github`, or run **Actions → Build AwayMode 0.2.2 APK → Run workflow**. Download artifact `awaymode-0.2.2-debug-apk` and install `app-debug.apk`.
 
-## Permissions
-
-- Location permission is requested because Android gates access to the connected Wi-Fi SSID behind location permission on many versions. Depending on Android/HyperOS, system Location may also need to be enabled.
-- Notification permission is requested on Android 13+ so the foreground monitoring notification is visible.
-
-## Build without Android Studio
-
-1. Copy the contents of this project to the root of the GitHub repository, including the hidden `.github` directory.
-2. Push to `main` (or run **Actions → Build Android APK → Run workflow**).
-3. Download artifact `awaymode-v2-debug-apk` from the completed workflow.
-4. Unzip and install `app-debug.apk`.
-
-Debug APK is for local testing, not Play Store distribution.
-
-
-## Исправление 0.2-test
-Мониторинг подписывается только на Wi-Fi, а не на основную сеть Android (которая меняется при включении VPN). Временное отсутствие SSID больше не считается отключением от доверенной сети. При потере Wi-Fi выдерживается задержка 12 секунд.
+This is a debug build for local testing. Android/HyperOS may restrict launching INCY from a background service; successful intent dispatch does not itself prove the VPN state changed. Verify INCY's actual status.
