@@ -3,6 +3,9 @@ plugins { id 'com.android.application' }
 android {
     namespace 'ru.awaymode.app'
     compileSdk 35
+    buildFeatures {
+        buildConfig true
+    }
     defaultConfig {
         applicationId 'ru.awaymode.app'
         minSdk 26
