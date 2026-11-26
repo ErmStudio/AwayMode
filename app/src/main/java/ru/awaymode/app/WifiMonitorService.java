@@ -85,7 +85,7 @@ public class WifiMonitorService extends Service {
         String current = readSsid();
         String previous = prefs.getString(LAST_SSID, "");
         Set<String> white = prefs.getStringSet(MainActivity.WHITE, Collections.emptySet());
-        Set<String> black = prefs.getString(MainActivity.BLACK, Collections.emptySet());
+        Set<String> black = prefs.getStringSet(MainActivity.BLACK, Collections.emptySet());
 
         if (current == null) {
             if (wifiLossPending) {
