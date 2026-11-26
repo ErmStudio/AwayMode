@@ -33,7 +33,7 @@ jobs:
           KEYSTORE_PASSWORD: ${{ secrets.AWAYMODE_KEYSTORE_PASSWORD }}
           KEY_ALIAS: ${{ secrets.AWAYMODE_KEY_ALIAS }}
           KEY_PASSWORD: ${{ secrets.AWAYMODE_KEY_PASSWORD }}
-          ANDROID_KEYSTORE_PATH: ${{ runner.temp }}/awaymode-release.jks
+          AWAYMODE_KEYSTORE_PATH: ${{ runner.temp }}/awaymode-release.p12
         run: |
           if [ -z "$KEYSTORE_BASE64" ] || [ -z "$KEYSTORE_PASSWORD" ] || [ -z "$KEY_ALIAS" ] || [ -z "$KEY_PASSWORD" ]; then
             echo "Missing signing key. Configure the four AWAYMODE_* repository secrets; see README.md."
@@ -42,7 +42,7 @@ jobs:
           printf '%s' "$KEYSTORE_BASE64" | base64 --decode > "$ANDROID_KEYSTORE_PATH"
       - name: Build signed release APK
         env:
-          ANDROID_KEYSTORE_PATH: ${{ runner.temp }}/awaymode-release.jks
+          AWAYMODE_KEYSTORE_PATH: ${{ runner.temp }}/awaymode-release.p12
           AWAYMODE_KEYSTORE_PASSWORD: ${{ secrets.AWAYMODE_KEYSTORE_PASSWORD }}
           AWAYMODE_KEY_ALIAS: ${{ secrets.AWAYMODE_KEY_ALIAS }}
           AWAYMODE_KEY_PASSWORD: ${{ secrets.AWAYMODE_KEY_PASSWORD }}

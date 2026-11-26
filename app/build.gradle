@@ -12,7 +12,8 @@ android {
     }
     signingConfigs {
         release {
-            storeFile file(System.getenv('AWAYMODE_KEYSTORE_PATH') ?: 'missing-keystore.jks')
+            storeFile file(System.getenv('AWAYMODE_KEYSTORE_PATH') ?: 'missing-keystore.p12')
+            storeType 'PKCS12'
             storePassword System.getenv('AWAYMODE_KEYSTORE_PASSWORD') ?: ''
             keyAlias System.getenv('AWAYMODE_KEY_ALIAS') ?: ''
             keyPassword System.getenv('AWAYMODE_KEY_PASSWORD') ?: ''

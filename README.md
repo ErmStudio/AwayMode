@@ -15,11 +15,12 @@ Android does not let ordinary apps read the phone's complete saved Wi-Fi list. A
 ## GitHub build and in-app updates
 Push to `main` (or run the workflow manually). GitHub Actions builds a signed APK and publishes it as a GitHub Release. In AwayMode tap **Проверить обновление** to download it. The Android installer opens for confirmation; Android does not allow a normal app to silently install APKs.
 
-The release APK must always use the same signing key or Android will reject updates. Create a key once with JDK 17's `keytool` in PowerShell:
+The release APK must always use the same signing key or Android will reject updates. This checkout's persistent key is stored outside the repository at `%USERPROFILE%\.android\awaymode-release.p12`; keep a secure backup of it. The four GitHub Actions secrets are already configured for this repository. To create a replacement key on another machine, use JDK 17's `keytool`:
 
 ```powershell
-keytool -genkeypair -v -keystore "$env:USERPROFILE\awaymode-release.jks" -storetype JKS -alias awaymode -keyalg RSA -keysize 2048 -validity 10000
-[Convert]::ToBase64String([IO.File]::ReadAllBytes("$env:USERPROFILE\awaymode-release.jks")) | Set-Clipboard
+New-Item -ItemType Directory -Force "$env:USERPROFILE\.android" | Out-Null
+keytool -genkeypair -v -keystore "$env:USERPROFILE\.android\awaymode-release.p12" -storetype PKCS12 -alias awaymode -keyalg RSA -keysize 3072 -validity 10000
+[Convert]::ToBase64String([IO.File]::ReadAllBytes("$env:USERPROFILE\.android\awaymode-release.p12")) | Set-Clipboard
 ```
 
 Keep the keystore and passwords backed up securely. In the GitHub repository, open **Settings → Secrets and variables → Actions** and create these repository secrets:
@@ -29,7 +30,7 @@ Keep the keystore and passwords backed up securely. In the GitHub repository, op
 - `AWAYMODE_KEY_ALIAS` — `awaymode`.
 - `AWAYMODE_KEY_PASSWORD` — the key password.
 
-The workflow fails with a clear message until these secrets are configured. Since older APKs were signed with temporary GitHub debug keys, the first install of the new stable-signature release requires uninstalling the old app once. Android removes app data on uninstall, so re-enter the network rules after that one-time migration. Future releases can update over the installed app and retain its settings.
+The workflow builds and publishes signed APKs after these secrets are configured. Since older APKs were signed with temporary GitHub debug keys, the first install of the new stable-signature release requires uninstalling the old app once. Android removes app data on uninstall, so re-enter the network rules after that one-time migration. Future releases can update over the installed app and retain its settings.
 
 ## Build without Android Studio
 Android Studio is optional. Local builds need JDK 17, Gradle 8.9, Android SDK platform 35 and Build Tools 35.0.0. GitHub Actions already installs these tools, so the usual flow needs no local Android SDK or APK download.

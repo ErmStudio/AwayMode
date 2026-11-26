@@ -1,0 +1,43 @@
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+
+    <!-- Door frame and open door -->
+    <path
+        android:fillColor="#35C965"
+        android:pathData="M14,94 L14,18 C14,13.6 17.6,10 22,10 L75,10 L75,17 L22,17 L22,94 Z" />
+    <path
+        android:fillColor="#22B85A"
+        android:pathData="M73,18 L97,11 L97,97 L73,90 Z" />
+    <path
+        android:fillColor="#168F46"
+        android:pathData="M91,20 L97,18 L97,90 L91,88 Z" />
+    <path
+        android:fillColor="#F7FFF9"
+        android:pathData="M82,56 A2.3,2.3 0,1 0,86.6 56 A2.3,2.3 0,1 0,82 56" />
+
+    <!-- Wi-Fi mark on the open door -->
+    <path
+        android:fillColor="@android:color/transparent"
+        android:pathData="M75,38 C81,32 89,32 95,38 M79,45 C83,41 88,41 92,45"
+        android:strokeColor="#FFFFFF"
+        android:strokeLineCap="round"
+        android:strokeLineJoin="round"
+        android:strokeWidth="3.8" />
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M83.2,50.2 A2.1,2.1 0,1 0,87.4 50.2 A2.1,2.1 0,1 0,83.2 50.2" />
+
+    <!-- Person walking through the doorway -->
+    <path
+        android:fillColor="#20B85A"
+        android:pathData="M37,43 A6.8,6.8 0,1 0,50.6 43 A6.8,6.8 0,1 0,37 43 M39,52 C33,52 29,55 27,60 L20,74 C18,78 20,81 24,82 L33,83 L38,72 L47,76 L51,87 L56,101 C57,105 61,107 64,105 C67,103 67,100 65,96 L60,79 L57,70 L63,59 C61,55 57,52 52,52 Z" />
+    <path
+        android:fillColor="#20B85A"
+        android:pathData="M39,78 L35,88 L21,99 C18,101 17,104 19,107 C21,110 24,109 27,107 L44,96 C48,93 49,90 48,86 L46,79 Z" />
+    <path
+        android:fillColor="#20B85A"
+        android:pathData="M54,60 L62,72 L77,74 C81,75 83,78 82,81 C81,84 78,85 75,84 L58,82 C55,81 53,79 51,76 L46,68 Z" />
+</vector>
