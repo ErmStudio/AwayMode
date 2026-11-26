@@ -39,7 +39,7 @@ jobs:
             echo "Missing signing key. Configure the four AWAYMODE_* repository secrets; see README.md."
             exit 1
           fi
-          printf '%s' "$KEYSTORE_BASE64" | base64 --decode > "$ANDROID_KEYSTORE_PATH"
+          printf '%s' "$KEYSTORE_BASE64" | base64 --decode > "$AWAYMODE_KEYSTORE_PATH"
       - name: Build signed release APK
         env:
           AWAYMODE_KEYSTORE_PATH: ${{ runner.temp }}/awaymode-release.p12
