@@ -27,8 +27,11 @@ import android.text.TextWatcher;
 import android.view.Gravity;
 import android.view.View;
 import android.view.ViewGroup;
+import android.view.WindowInsets;
+import android.view.WindowInsetsController;
 import android.widget.Button;
 import android.widget.EditText;
+import android.widget.FrameLayout;
 import android.widget.LinearLayout;
 import android.widget.ImageView;
 import android.widget.ScrollView;
@@ -71,6 +74,9 @@ public class MainActivity extends Activity {
     private SharedPreferences prefs;
     private WifiManager wifi;
     private LinearLayout root, networkRows;
+    private FrameLayout pageHost;
+    private View[] pages;
+    private TextView[] tabLabels;
     private EditText search;
     private TextView currentLabel, currentHint, automationLabel, automationHint, logView, networkEmpty;
     private Switch automationSwitch;
@@ -105,21 +111,20 @@ public class MainActivity extends Activity {
     }
 
     private void buildUi() {
-        ScrollView scroll = new ScrollView(this);
-        scroll.setFillViewport(true);
-        scroll.setClipToPadding(false);
-        root = new LinearLayout(this);
-        root.setOrientation(LinearLayout.VERTICAL);
-        root.setPadding(dp(18), dp(18), dp(18), dp(32));
-        root.setBackgroundColor(0xFFF1F6F3);
-        scroll.addView(root);
+        LinearLayout shell = new LinearLayout(this);
+        shell.setOrientation(LinearLayout.VERTICAL);
+        shell.setPadding(dp(16), 0, dp(16), 0);
+        shell.setBackground(gradient(0xFFEFF2F4, 0xFFDDE3E7, 0));
+        applySystemBarInsets(shell);
 
         LinearLayout header = new LinearLayout(this);
         header.setOrientation(LinearLayout.HORIZONTAL);
         header.setGravity(Gravity.CENTER_VERTICAL);
+        header.setPadding(0, dp(10), 0, dp(14));
         ImageView logo = new ImageView(this);
         logo.setImageResource(R.mipmap.ic_launcher);
-        header.addView(logo, new LinearLayout.LayoutParams(dp(54), dp(54)));
+        logo.setContentDescription("AwayMode");
+        header.addView(logo, new LinearLayout.LayoutParams(dp(46), dp(46)));
         LinearLayout heading = new LinearLayout(this);
         heading.setOrientation(LinearLayout.VERTICAL);
         LinearLayout.LayoutParams headingParams = new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1);
@@ -132,12 +137,68 @@ public class MainActivity extends Activity {
         version.setPadding(dp(10), dp(7), dp(10), dp(7));
         version.setBackground(round(0xFFD9F0E2, 20));
         header.addView(version);
-        add(header, 0, 18);
+        shell.addView(header, full());
 
+        LinearLayout tabs = new LinearLayout(this);
+        tabs.setOrientation(LinearLayout.HORIZONTAL);
+        tabs.setPadding(dp(5), dp(5), dp(5), dp(5));
+        tabs.setBackground(round(0xFFE2E7EA, 16));
+        String[] titles = {"Сети и правила", "Логи", "Настройки"};
+        tabLabels = new TextView[titles.length];
+        for (int i = 0; i < titles.length; i++) {
+            final int page = i;
+            TextView tab = text(titles[i], 12, 0xFF59666D, true);
+            tab.setGravity(Gravity.CENTER);
+            tab.setPadding(dp(5), dp(11), dp(5), dp(11));
+            tab.setOnClickListener(v -> showPage(page));
+            LinearLayout.LayoutParams tabParams = new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1);
+            tabParams.leftMargin = dp(2);
+            tabParams.rightMargin = dp(2);
+            tabs.addView(tab, tabParams);
+            tabLabels[i] = tab;
+        }
+        LinearLayout.LayoutParams tabsParams = full();
+        tabsParams.bottomMargin = dp(8);
+        shell.addView(tabs, tabsParams);
+
+        pageHost = new FrameLayout(this);
+        shell.addView(pageHost, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1));
+        pages = new View[3];
+
+        root = createPage(0);
+        buildNetworksPage();
+
+        root = createPage(1);
+        buildLogsPage();
+
+        root = createPage(2);
+        buildSettingsPage();
+
+        setContentView(shell);
+        configureSystemBars();
+        showPage(0);
+    }
+
+    private LinearLayout createPage(int index) {
+        ScrollView scroll = new ScrollView(this);
+        scroll.setFillViewport(true);
+        scroll.setClipToPadding(false);
+        LinearLayout page = new LinearLayout(this);
+        page.setOrientation(LinearLayout.VERTICAL);
+        page.setPadding(dp(2), dp(8), dp(2), dp(24));
+        scroll.addView(page);
+        pages[index] = scroll;
+        pageHost.addView(scroll, new FrameLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
+        return page;
+    }
+
+    private void buildNetworksPage() {
         LinearLayout networkHero = new LinearLayout(this);
         networkHero.setOrientation(LinearLayout.VERTICAL);
         networkHero.setPadding(dp(18), dp(16), dp(18), dp(16));
-        networkHero.setBackground(gradient(0xFF0E6546, 0xFF13865A, 22));
+        networkHero.setBackground(gradient(0xFF344C59, 0xFF526A76, 22));
+        networkHero.setElevation(dp(3));
         networkHero.addView(text("ТЕКУЩЕЕ ПОДКЛЮЧЕНИЕ", 10, 0xFFC7EBD7, true));
         currentLabel = text("Определяем сеть…", 21, 0xFFFFFFFF, true);
         currentLabel.setMaxLines(2);
@@ -149,27 +210,6 @@ public class MainActivity extends Activity {
         hintParams.topMargin = dp(3);
         networkHero.addView(currentHint, hintParams);
         add(networkHero, 0, 12);
-
-        LinearLayout autoCard = new LinearLayout(this);
-        autoCard.setOrientation(LinearLayout.HORIZONTAL);
-        autoCard.setGravity(Gravity.CENTER_VERTICAL);
-        autoCard.setPadding(dp(16), dp(13), dp(14), dp(13));
-        autoCard.setBackground(surfaceBackground());
-        LinearLayout labels = new LinearLayout(this);
-        labels.setOrientation(LinearLayout.VERTICAL);
-        automationLabel = text("Автоматизация выключена", 16, 0xFF173B2D, true);
-        labels.addView(automationLabel);
-        automationHint = text("Включи, чтобы отслеживать смену сети", 12, 0xFF64796F, false);
-        LinearLayout.LayoutParams autoHintParams = full();
-        autoHintParams.topMargin = dp(3);
-        labels.addView(automationHint, autoHintParams);
-        autoCard.addView(labels, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1));
-        automationSwitch = new Switch(this);
-        automationSwitch.setOnCheckedChangeListener((v, checked) -> {
-            if (checked) startAutomation(); else stopAutomation();
-        });
-        autoCard.addView(automationSwitch);
-        add(autoCard, 0, 20);
 
         sectionTitle("СЕТИ И ПРАВИЛА", "Твои сети и действия INCY");
         TextView note = text("Android не разрешает сторонним приложениям читать полный список сохранённых Wi-Fi. Добавь сеть вручную или подключись к ней.", 12, 0xFF64796F, false);
@@ -221,43 +261,117 @@ public class MainActivity extends Activity {
         LinearLayout.LayoutParams rulesParams = full();
         rulesParams.topMargin = dp(5);
         rulesCard.addView(rules, rulesParams);
-        add(rulesCard, 0, 10);
+        add(rulesCard, 0, 12);
+    }
 
-        TextView battery = text("Для надёжной работы на Xiaomi разреши AwayMode автозапуск и работу без ограничений батареи.", 12, 0xFF8A6532, false);
-        battery.setPadding(dp(3), dp(4), dp(3), dp(4));
-        add(battery, 0, 12);
-
-        LinearLayout updateCard = new LinearLayout(this);
-        updateCard.setOrientation(LinearLayout.HORIZONTAL);
-        updateCard.setGravity(Gravity.CENTER_VERTICAL);
-        updateCard.setPadding(dp(15), dp(11), dp(11), dp(11));
-        updateCard.setBackground(surfaceBackground());
-        TextView updateInfo = text("Обновления приложения\nУстановленная версия v" + BuildConfig.VERSION_NAME, 12, 0xFF52685E, false);
-        updateCard.addView(updateInfo, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1));
-        Button update = button("Проверить");
-        update.setOnClickListener(v -> checkForUpdate());
-        updateCard.addView(update, new LinearLayout.LayoutParams(dp(116), dp(44)));
-        add(updateCard, 0, 20);
-
-        sectionTitle("ЖУРНАЛ", "До 120 событий · показаны последние 40");
+    private void buildLogsPage() {
+        sectionTitle("ЖУРНАЛ СОБЫТИЙ", "Хранится до 120 записей · показаны последние 40");
         LinearLayout logActions = new LinearLayout(this);
         logActions.setOrientation(LinearLayout.HORIZONTAL);
         Button shareLogs = button("Поделиться логом");
         shareLogs.setOnClickListener(v -> confirmShareLogs());
         logActions.addView(shareLogs, new LinearLayout.LayoutParams(0, dp(46), 1));
         Button clearLogs = button("Очистить");
-        clearLogs.setTextColor(0xFF52685E);
-        clearLogs.setBackground(round(0xFFE4ECE7, 13));
+        clearLogs.setTextColor(0xFF52616A);
+        clearLogs.setBackground(round(0xFFE1E6E9, 13));
         clearLogs.setOnClickListener(v -> confirmClearLogs());
         LinearLayout.LayoutParams clearParams = new LinearLayout.LayoutParams(dp(96), dp(46));
         clearParams.leftMargin = dp(8);
         logActions.addView(clearLogs, clearParams);
         add(logActions, 0, 8);
-        logView = text("", 11, 0xFF465B51, false);
+        logView = text("", 11, 0xFF46545B, false);
         logView.setTextIsSelectable(true);
         card(logView, 0, 8);
         refreshLog();
-        setContentView(scroll);
+    }
+
+    private void buildSettingsPage() {
+        sectionTitle("НАСТРОЙКИ", "Автоматизация и версия приложения");
+        LinearLayout autoCard = new LinearLayout(this);
+        autoCard.setOrientation(LinearLayout.HORIZONTAL);
+        autoCard.setGravity(Gravity.CENTER_VERTICAL);
+        autoCard.setPadding(dp(16), dp(13), dp(14), dp(13));
+        autoCard.setBackground(surfaceBackground());
+        autoCard.setElevation(dp(2));
+        LinearLayout labels = new LinearLayout(this);
+        labels.setOrientation(LinearLayout.VERTICAL);
+        automationLabel = text("Автоматизация выключена", 16, 0xFF26343B, true);
+        labels.addView(automationLabel);
+        automationHint = text("Включи, чтобы отслеживать смену сети", 12, 0xFF64737A, false);
+        LinearLayout.LayoutParams autoHintParams = full();
+        autoHintParams.topMargin = dp(3);
+        labels.addView(automationHint, autoHintParams);
+        autoCard.addView(labels, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1));
+        automationSwitch = new Switch(this);
+        automationSwitch.setOnCheckedChangeListener((v, checked) -> {
+            if (checked) startAutomation(); else stopAutomation();
+        });
+        autoCard.addView(automationSwitch);
+        add(autoCard, 0, 16);
+
+        LinearLayout infoCard = new LinearLayout(this);
+        infoCard.setOrientation(LinearLayout.VERTICAL);
+        infoCard.setPadding(dp(16), dp(14), dp(16), dp(14));
+        infoCard.setBackground(surfaceBackground());
+        infoCard.setElevation(dp(2));
+        infoCard.addView(text("AwayMode", 17, 0xFF26343B, true));
+        TextView installedVersion = text("Установленная версия v" + BuildConfig.VERSION_NAME, 13, 0xFF64737A, false);
+        LinearLayout.LayoutParams installedParams = full();
+        installedParams.topMargin = dp(4);
+        infoCard.addView(installedVersion, installedParams);
+        add(infoCard, 0, 10);
+
+        LinearLayout updateCard = new LinearLayout(this);
+        updateCard.setOrientation(LinearLayout.HORIZONTAL);
+        updateCard.setGravity(Gravity.CENTER_VERTICAL);
+        updateCard.setPadding(dp(15), dp(11), dp(11), dp(11));
+        updateCard.setBackground(surfaceBackground());
+        TextView updateInfo = text("Обновления приложения\nПроверить и установить свежую версию", 12, 0xFF52616A, false);
+        updateCard.addView(updateInfo, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1));
+        Button update = button("Проверить");
+        update.setOnClickListener(v -> checkForUpdate());
+        updateCard.addView(update, new LinearLayout.LayoutParams(dp(116), dp(44)));
+        add(updateCard, 0, 14);
+
+        TextView battery = text("Для работы в фоне на Xiaomi разреши автозапуск и отключи ограничения батареи для AwayMode.", 12, 0xFF735B3C, false);
+        card(battery, 0, 10);
+    }
+
+    private void showPage(int selected) {
+        if (pageHost == null || pages == null) return;
+        for (int i = 0; i < pages.length; i++) {
+            View page = pages[i];
+            page.setVisibility(i == selected ? View.VISIBLE : View.GONE);
+            TextView tab = tabLabels[i];
+            tab.setTextColor(i == selected ? 0xFFFFFFFF : 0xFF59666D);
+            tab.setBackground(round(i == selected ? 0xFF3D5966 : 0x00FFFFFF, 12));
+        }
+    }
+
+    private void applySystemBarInsets(View view) {
+        view.setOnApplyWindowInsetsListener((v, insets) -> {
+            int top, bottom, left, right;
+            if (Build.VERSION.SDK_INT >= 30) {
+                android.graphics.Insets bars = insets.getInsets(WindowInsets.Type.systemBars() | WindowInsets.Type.displayCutout());
+                top = bars.top; bottom = bars.bottom; left = bars.left; right = bars.right;
+            } else {
+                top = insets.getSystemWindowInsetTop(); bottom = insets.getSystemWindowInsetBottom();
+                left = insets.getSystemWindowInsetLeft(); right = insets.getSystemWindowInsetRight();
+            }
+            v.setPadding(dp(16) + left, top, dp(16) + right, bottom);
+            return insets;
+        });
+    }
+
+    private void configureSystemBars() {
+        if (Build.VERSION.SDK_INT >= 30) {
+            WindowInsetsController controller = getWindow().getInsetsController();
+            if (controller != null) controller.setSystemBarsAppearance(
+                    WindowInsetsController.APPEARANCE_LIGHT_STATUS_BARS | WindowInsetsController.APPEARANCE_LIGHT_NAVIGATION_BARS,
+                    WindowInsetsController.APPEARANCE_LIGHT_STATUS_BARS | WindowInsetsController.APPEARANCE_LIGHT_NAVIGATION_BARS);
+        } else {
+            getWindow().getDecorView().setSystemUiVisibility(View.SYSTEM_UI_FLAG_LIGHT_STATUS_BAR | View.SYSTEM_UI_FLAG_LIGHT_NAVIGATION_BAR);
+        }
     }
 
     private void sectionTitle(String title, String subtitle) {
@@ -523,7 +637,7 @@ public class MainActivity extends Activity {
             boolean connected = hasConnectedWifi();
             currentLabel.setText(currentSsid != null ? currentSsid : connected ? "Имя сети недоступно" : "Wi-Fi отключён");
             String hint;
-            if (currentSsid == null && connected) hint = "Разреши доступ к местоположению, чтобы читать имя сети";
+            if (currentSsid == null && connected) hint = "Android скрыл имя сети · проверь разрешение и включи геолокацию";
             else if (currentSsid == null) hint = "На мобильной сети правило по умолчанию — включить VPN";
             else if ("white".equals(getMode(currentSsid))) hint = "Доверенная сеть · VPN выключается";
             else if ("black".equals(getMode(currentSsid))) hint = "Для этой сети выбрано включение VPN";
@@ -536,6 +650,17 @@ public class MainActivity extends Activity {
     private String readCurrentSsid() {
         if (!hasLocationPermission() || wifi == null || !hasConnectedWifi()) return null;
         try {
+            if (Build.VERSION.SDK_INT >= 29) {
+                ConnectivityManager cm = (ConnectivityManager) getSystemService(CONNECTIVITY_SERVICE);
+                if (cm != null) for (Network network : cm.getAllNetworks()) {
+                    NetworkCapabilities caps = cm.getNetworkCapabilities(network);
+                    if (caps != null && caps.hasTransport(NetworkCapabilities.TRANSPORT_WIFI)
+                            && caps.getTransportInfo() instanceof WifiInfo) {
+                        String ssid = cleanSsid(((WifiInfo) caps.getTransportInfo()).getSSID());
+                        if (ssid != null) return ssid;
+                    }
+                }
+            }
             WifiInfo info = wifi.getConnectionInfo();
             if (info == null) return null;
             return cleanSsid(info.getSSID());
@@ -657,7 +782,8 @@ public class MainActivity extends Activity {
         white.remove(ssid); black.remove(ssid);
         if ("white".equals(mode)) white.add(ssid);
         if ("black".equals(mode)) black.add(ssid);
-        prefs.edit().putStringSet(KNOWN, known).putStringSet(WHITE, white).putStringSet(BLACK, black).apply();
+        prefs.edit().putStringSet(KNOWN, known).putStringSet(WHITE, white).putStringSet(BLACK, black)
+                .remove(WifiMonitorService.LAST_DECISION).apply();
         String modeName = "white".equals(mode) ? "выключить VPN" : "black".equals(mode) ? "включить VPN" : "не учитывать";
         appendLog(this, "Правило сети «" + ssid + "»: " + modeName);
         renderNetworks();
@@ -690,13 +816,14 @@ public class MainActivity extends Activity {
             return;
         }
         prefs.edit().putBoolean(AUTO, true).putBoolean(SERVICE_ALIVE, false).apply();
-        launchMonitorService();
+        launchMonitorService(true);
         updateAutomationUi();
         Toast.makeText(this, "Мониторинг Wi-Fi запускается", Toast.LENGTH_SHORT).show();
     }
 
-    private void launchMonitorService() {
+    private void launchMonitorService(boolean forceEvaluation) {
         Intent i = new Intent(this, WifiMonitorService.class);
+        i.putExtra(WifiMonitorService.EXTRA_FORCE_EVALUATION, forceEvaluation);
         if (Build.VERSION.SDK_INT >= 26) startForegroundService(i); else startService(i);
     }
 
@@ -704,7 +831,7 @@ public class MainActivity extends Activity {
         if (!prefs.getBoolean(AUTO, false) || isMonitorServiceRunning()) return;
         try {
             prefs.edit().putBoolean(SERVICE_ALIVE, false).apply();
-            launchMonitorService();
+            launchMonitorService(true);
             appendLog(this, "Восстанавливаю остановленный мониторинг");
         } catch (Exception e) {
             appendLog(this, "Не удалось восстановить мониторинг: " + e.getClass().getSimpleName());
@@ -757,15 +884,15 @@ public class MainActivity extends Activity {
     }
     private Button button(String value) {
         Button b = new Button(this); b.setText(value); b.setAllCaps(false); b.setTextSize(12);
-        b.setTextColor(0xFFFFFFFF); b.setBackground(round(0xFF128255, 13));
+        b.setTextColor(0xFFFFFFFF); b.setBackground(round(0xFF415D69, 13));
         return b;
     }
     private GradientDrawable round(int color, int radius) {
         GradientDrawable d = new GradientDrawable(); d.setColor(color); d.setCornerRadius(dp(radius)); return d;
     }
     private GradientDrawable surfaceBackground() {
-        GradientDrawable d = round(0xFFFFFFFF, 16);
-        d.setStroke(dp(1), 0xFFDDE8E1);
+        GradientDrawable d = round(0xFFF9FAFB, 17);
+        d.setStroke(dp(1), 0xFFD0D8DD);
         return d;
     }
     private GradientDrawable gradient(int start, int end, int radius) {

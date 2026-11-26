@@ -27,7 +27,8 @@ public class WifiMonitorService extends Service {
     private static final String CHANNEL = "awaymode_monitor";
     private static final int NOTIFICATION_ID = 42;
     private static final String LAST_SSID = "last_observed_ssid";
-    private static final String LAST_DECISION = "last_network_decision";
+    static final String LAST_DECISION = "last_network_decision";
+    static final String EXTRA_FORCE_EVALUATION = "force_network_evaluation";
     private final Handler handler = new Handler(Looper.getMainLooper());
     private ConnectivityManager connectivity;
     private ConnectivityManager.NetworkCallback callback;
@@ -54,6 +55,11 @@ public class WifiMonitorService extends Service {
 
     @Override public int onStartCommand(Intent intent, int flags, int startId) {
         prefs.edit().putBoolean(MainActivity.AUTO, true).apply();
+        if (intent != null && intent.getBooleanExtra(EXTRA_FORCE_EVALUATION, false)) {
+            prefs.edit().remove(LAST_DECISION).apply();
+            MainActivity.appendLog(this, "Применяю правило для текущей сети заново");
+            scheduleEvaluation(3000);
+        }
         return START_STICKY;
     }
 
@@ -103,7 +109,7 @@ public class WifiMonitorService extends Service {
         Set<String> black = prefs.getStringSet(MainActivity.BLACK, Collections.emptySet());
 
         if (wifiConnected && current == null) {
-            setStatus("Wi-Fi подключён, имя сети пока недоступно; жду данные Android");
+            setStatus("Wi-Fi подключён, Android скрыл имя сети; проверь разрешение и включи геолокацию");
             return;
         }
 
@@ -139,15 +145,28 @@ public class WifiMonitorService extends Service {
     private String readSsid() {
         if (checkSelfPermission(android.Manifest.permission.ACCESS_FINE_LOCATION) != PackageManager.PERMISSION_GRANTED) return null;
         try {
+            if (Build.VERSION.SDK_INT >= 29 && connectivity != null) {
+                for (Network network : connectivity.getAllNetworks()) {
+                    NetworkCapabilities caps = connectivity.getNetworkCapabilities(network);
+                    if (caps != null && caps.hasTransport(NetworkCapabilities.TRANSPORT_WIFI)
+                            && caps.getTransportInfo() instanceof WifiInfo) {
+                        String ssid = cleanSsid(((WifiInfo) caps.getTransportInfo()).getSSID());
+                        if (ssid != null) return ssid;
+                    }
+                }
+            }
             WifiManager wm = (WifiManager) getApplicationContext().getSystemService(WIFI_SERVICE);
             if (wm == null) return null;
             WifiInfo info = wm.getConnectionInfo();
             if (info == null) return null;
-            String ssid = info.getSSID();
-            if (ssid == null || ssid.equals(WifiManager.UNKNOWN_SSID) || ssid.equals("<unknown ssid>")) return null;
-            if (ssid.length() >= 2 && ssid.startsWith("\"") && ssid.endsWith("\"")) ssid = ssid.substring(1, ssid.length() - 1);
-            return ssid;
+            return cleanSsid(info.getSSID());
         } catch (Exception e) { return null; }
+    }
+
+    private String cleanSsid(String ssid) {
+        if (ssid == null || ssid.equals(WifiManager.UNKNOWN_SSID) || ssid.equals("<unknown ssid>")) return null;
+        if (ssid.length() >= 2 && ssid.startsWith("\"") && ssid.endsWith("\"")) ssid = ssid.substring(1, ssid.length() - 1);
+        return ssid.trim().isEmpty() ? null : ssid.trim();
     }
 
     private void requestVpnAction(boolean connect, String reason) {
