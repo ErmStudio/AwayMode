@@ -27,7 +27,7 @@ public class WifiMonitorService extends Service {
     private static final String CHANNEL = "awaymode_monitor";
     private static final int NOTIFICATION_ID = 42;
     private static final String LAST_SSID = "last_observed_ssid";
-    private static final String LAST_ACTION = "last_vpn_action";
+    private static final String LAST_DECISION = "last_network_decision";
     private final Handler handler = new Handler(Looper.getMainLooper());
     private ConnectivityManager connectivity;
     private ConnectivityManager.NetworkCallback callback;
@@ -35,10 +35,14 @@ public class WifiMonitorService extends Service {
     private SharedPreferences prefs;
     private String statusText = "Ожидание изменения Wi-Fi";
     private boolean lastConnectRequested = true;
+    private final SharedPreferences.OnSharedPreferenceChangeListener ruleListener = (shared, key) -> {
+        if (MainActivity.WHITE.equals(key) || MainActivity.BLACK.equals(key)) scheduleEvaluation(3000);
+    };
 
     @Override public void onCreate() {
         super.onCreate();
         prefs = getSharedPreferences(MainActivity.PREFS, MODE_PRIVATE);
+        prefs.registerOnSharedPreferenceChangeListener(ruleListener);
         connectivity = (ConnectivityManager) getSystemService(CONNECTIVITY_SERVICE);
         createChannel();
         startForeground(NOTIFICATION_ID, buildNotification("Мониторинг Wi-Fi запущен · " + BuildConfig.VERSION_NAME));
@@ -91,37 +95,64 @@ public class WifiMonitorService extends Service {
     private final Runnable evaluateRunnable = this::evaluateNetwork;
 
     private void evaluateNetwork() {
-        String current = isWifiConnected() ? readSsid() : null;
+        boolean wifiConnected = isWifiConnected();
+        String current = wifiConnected ? readSsid() : null;
         String previous = prefs.getString(LAST_SSID, "");
         Set<String> white = prefs.getStringSet(MainActivity.WHITE, Collections.emptySet());
         Set<String> black = prefs.getStringSet(MainActivity.BLACK, Collections.emptySet());
 
-        if (current == null) {
-            if (isWifiConnected()) {
-                setStatus("Wi-Fi подключён, но имя сети недоступно; VPN не трогаем");
-            } else {
-                requestVpnAction(true, previous.isEmpty()
-                        ? "Wi-Fi отключён; на мобильном интернете включаем INCY"
-                        : "Потеряли Wi-Fi сеть «" + previous + "»; на мобильном интернете включаем INCY");
-                prefs.edit().putString(LAST_SSID, "").apply();
-            }
-            return;
-        }
-        if (current.equals(previous)) {
-            setStatus("Сеть «" + current + "» без изменений; VPN не трогаем");
+        if (wifiConnected && current == null) {
+            setStatus("Wi-Fi подключён, имя сети пока недоступно; жду данные Android");
             return;
         }
 
-        if (white.contains(current)) {
-            requestVpnAction(false, "Для сети «" + current + "» выбрано «Выключить VPN»");
+        String decision;
+        String reason;
+        boolean actionRequired;
+        boolean connect;
+        if (!wifiConnected) {
+            decision = "mobile|connect";
+            reason = previous.isEmpty()
+                    ? "Wi-Fi отключён; по правилу мобильной сети включаем INCY"
+                    : "Потеряли Wi-Fi сеть «" + previous + "»; на мобильной сети включаем INCY";
+            actionRequired = true;
+            connect = true;
+        } else if (white.contains(current)) {
+            decision = "wifi|" + current + "|disconnect";
+            reason = "Для сети «" + current + "» выбрано «Выключить VPN»";
+            actionRequired = true;
+            connect = false;
         } else if (black.contains(current)) {
-            requestVpnAction(true, "Для сети «" + current + "» выбрано «Включить VPN»");
+            decision = "wifi|" + current + "|connect";
+            reason = "Для сети «" + current + "» выбрано «Включить VPN»";
+            actionRequired = true;
+            connect = true;
         } else if (!previous.isEmpty() && white.contains(previous)) {
-            requestVpnAction(true, "Покинули доверенную сеть; после 3 секунд проверки включаем INCY");
+            decision = "wifi|" + current + "|outside-trusted|connect";
+            reason = "Покинули доверенную сеть «" + previous + "»; включаем INCY";
+            actionRequired = true;
+            connect = true;
         } else {
-            setStatus("Неизвестная сеть «" + current + "»: состояние VPN не меняем");
+            decision = "wifi|" + current + "|no-rule";
+            reason = "Сеть «" + current + "» без правила; VPN не меняем";
+            actionRequired = false;
+            connect = false;
         }
-        prefs.edit().putString(LAST_SSID, current).apply();
+
+        String previousDecision = prefs.getString(LAST_DECISION, "");
+        if (decision.equals(previousDecision)) {
+            setStatus(actionRequired
+                    ? "Состояние сети не изменилось; команда уже отправлялась, статус INCY неизвестен"
+                    : reason);
+            return;
+        }
+
+        if (actionRequired) requestVpnAction(connect, reason);
+        else setStatus(reason);
+        prefs.edit()
+                .putString(LAST_SSID, wifiConnected ? current : "")
+                .putString(LAST_DECISION, decision)
+                .apply();
     }
 
     private boolean isWifiConnected() {
@@ -152,19 +183,12 @@ public class WifiMonitorService extends Service {
     private void requestVpnAction(boolean connect, String reason) {
         String action = connect ? "connect" : "disconnect";
         lastConnectRequested = connect;
-        String previousAction = prefs.getString(LAST_ACTION, "");
-        if (action.equals(previousAction)) {
-            MainActivity.appendLog(this, "Команда incy://" + action + " пропущена: такую уже отправляли ранее; факт состояния INCY неизвестен");
-            setStatus(reason + " (команда уже отправлялась)");
-            return;
-        }
         String uri = connect ? "incy://connect" : "incy://disconnect";
         MainActivity.appendLog(this, "Отправляю " + uri + ". Причина: " + reason);
         try {
             Intent intent = new Intent(Intent.ACTION_VIEW, Uri.parse(uri));
             intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
             startActivity(intent);
-            prefs.edit().putString(LAST_ACTION, action).apply();
             setStatus(reason + ". Команда передана Android; проверь фактический статус INCY.");
         } catch (ActivityNotFoundException e) {
             setStatus("Не найден обработчик " + uri + ". Проверь установку INCY.");
@@ -213,6 +237,7 @@ public class WifiMonitorService extends Service {
 
     @Override public void onDestroy() {
         handler.removeCallbacksAndMessages(null);
+        if (prefs != null) prefs.unregisterOnSharedPreferenceChangeListener(ruleListener);
         if (connectivity != null && callback != null) {
             try { connectivity.unregisterNetworkCallback(callback); } catch (Exception ignored) {}
         }

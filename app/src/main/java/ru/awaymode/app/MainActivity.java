@@ -183,6 +183,9 @@ public class MainActivity extends Activity {
 
         TextView logTitle = text("ЖУРНАЛ СОБЫТИЙ", 15, 0xFF91A9FF, true);
         add(logTitle, 0, 8);
+        Button shareLogs = button("Отправить логи разработчику");
+        shareLogs.setOnClickListener(v -> confirmShareLogs());
+        add(shareLogs, 0, 8);
         logView = text("", 11, 0xFFB7C2D3, false);
         logView.setTextIsSelectable(true);
         card(logView, 0, 8);
@@ -344,6 +347,30 @@ public class MainActivity extends Activity {
         for (int i = start; i < old.length; i++) next.append(old[i]).append('\n');
         next.append(stamp).append("  ").append(message.replace('\n', ' '));
         prefs.edit().putString(LOG, next.toString()).apply();
+    }
+
+    private void confirmShareLogs() {
+        new AlertDialog.Builder(this)
+                .setTitle("Отправить журнал событий?")
+                .setMessage("Журнал содержит время событий и имена Wi-Fi сетей. Он не отправится автоматически: дальше выбери приложение и получателя.")
+                .setPositiveButton("Продолжить", (dialog, which) -> shareLogs())
+                .setNegativeButton("Отмена", null)
+                .show();
+    }
+
+    private void shareLogs() {
+        String logs = prefs.getString(LOG, "");
+        String report = "AwayMode " + BuildConfig.VERSION_NAME
+                + "\nAndroid " + Build.VERSION.RELEASE
+                + " · " + Build.MANUFACTURER + " " + Build.MODEL
+                + "\n\nЖурнал событий:\n"
+                + (logs.isEmpty() ? "(журнал пуст)" : logs);
+        Intent send = new Intent(Intent.ACTION_SEND);
+        send.setType("text/plain");
+        send.putExtra(Intent.EXTRA_SUBJECT, "AwayMode — журнал событий");
+        send.putExtra(Intent.EXTRA_TEXT, report);
+        startActivity(Intent.createChooser(send, "Отправить логи разработчику"));
+        appendLog(this, "Пользователь открыл меню отправки журнала");
     }
 
     private void refreshLog() {
