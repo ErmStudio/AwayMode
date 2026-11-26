@@ -288,11 +288,12 @@ public class MainActivity extends Activity {
                 PackageInstaller.SessionParams params = new PackageInstaller.SessionParams(PackageInstaller.SessionParams.MODE_FULL_INSTALL);
                 params.setAppPackageName(getPackageName());
                 sessionId = installer.createSession(params);
-                try (PackageInstaller.Session session = installer.openSession(sessionId);
-                     FileInputStream in = new FileInputStream(apk);
-                     OutputStream out = session.openWrite("base.apk", 0, apk.length())) {
-                    copy(in, out);
-                    session.fsync(out);
+                try (PackageInstaller.Session session = installer.openSession(sessionId)) {
+                    try (FileInputStream in = new FileInputStream(apk);
+                         OutputStream out = session.openWrite("base.apk", 0, apk.length())) {
+                        copy(in, out);
+                        session.fsync(out);
+                    }
                     Intent callback = new Intent(this, InstallStatusReceiver.class).setAction(InstallStatusReceiver.ACTION);
                     callback.putExtra(PackageInstaller.EXTRA_SESSION_ID, sessionId);
                     int flags = PendingIntent.FLAG_UPDATE_CURRENT;
