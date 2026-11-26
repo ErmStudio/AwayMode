@@ -7,15 +7,12 @@ import android.content.Context;
 import android.content.Intent;
 import android.content.SharedPreferences;
 import android.content.pm.PackageManager;
-import android.location.LocationManager;
-import android.net.wifi.ScanResult;
 import android.net.wifi.WifiInfo;
 import android.net.wifi.WifiManager;
 import android.os.Build;
 import android.os.Bundle;
 import android.os.Handler;
 import android.os.Looper;
-import android.provider.Settings;
 import android.graphics.Typeface;
 import android.graphics.drawable.GradientDrawable;
 import android.text.Editable;
@@ -31,12 +28,9 @@ import android.widget.Switch;
 import android.widget.TextView;
 import android.widget.Toast;
 
-import java.util.ArrayList;
 import java.util.Collections;
-import java.util.List;
 import java.util.Map;
 import java.util.Set;
-import java.util.TreeMap;
 import java.util.TreeSet;
 
 public class MainActivity extends Activity {
@@ -54,7 +48,6 @@ public class MainActivity extends Activity {
     private TextView currentLabel, scanLabel, automationLabel;
     private Switch automationSwitch;
     private String currentSsid;
-    private List<ScanResult> scanResults = new ArrayList<>();
 
     @Override public void onCreate(Bundle state) {
         super.onCreate(state);
@@ -71,7 +64,6 @@ public class MainActivity extends Activity {
         if (prefs != null) {
             refreshCurrent();
             updateAutomationUi();
-            if (hasLocationPermission()) scanNetworks();
         }
     }
 
@@ -101,8 +93,8 @@ public class MainActivity extends Activity {
         LinearLayout scanBar = new LinearLayout(this);
         scanBar.setOrientation(LinearLayout.HORIZONTAL);
         scanBar.setGravity(Gravity.CENTER_VERTICAL);
-        Button scan = button("Обновить сети");
-        scan.setOnClickListener(v -> scanNetworks());
+        Button scan = button("Добавить текущую");
+        scan.setOnClickListener(v -> addCurrentNetwork());
         scanBar.addView(scan, new LinearLayout.LayoutParams(0, dp(46), 1));
         Button manual = button("Ввести вручную");
         manual.setOnClickListener(v -> askForSsid());
@@ -126,7 +118,7 @@ public class MainActivity extends Activity {
             public void afterTextChanged(Editable e) {}
         });
 
-        scanLabel = text("Нажми «Обновить сети», чтобы найти Wi-Fi поблизости", 12, 0xFF9AA8BD, false);
+        scanLabel = text("Сети поблизости не показываются: выбери текущую или добавь имя вручную.", 12, 0xFF9AA8BD, false);
         add(scanLabel, 0, 10);
         networkRows = new LinearLayout(this);
         networkRows.setOrientation(LinearLayout.VERTICAL);
@@ -153,7 +145,7 @@ public class MainActivity extends Activity {
         autoCard.addView(automationSwitch);
         add(autoCard, 0, 12);
 
-        TextView rules = text("Белый список — отключить INCY. Чёрный список — включить INCY. Не учитывать — ничего не менять. При уходе из белой сети VPN включается через 12 секунд.", 12, 0xFF9AA8BD, false);
+        TextView rules = text("Белый список — отключить INCY. Чёрный список — включить INCY. Не учитывать — ничего не менять. При уходе из белой сети VPN включается через 3 секунды после проверки подключения.", 12, 0xFF9AA8BD, false);
         add(rules, 0, 8);
         TextView battery = text("Для стабильной работы на Xiaomi отключи ограничения батареи для AwayMode и разреши автозапуск в настройках HyperOS.", 12, 0xFFFFD28A, false);
         add(battery, 0, 8);
@@ -164,7 +156,7 @@ public class MainActivity extends Activity {
         if (!hasLocationPermission()) {
             new AlertDialog.Builder(this)
                     .setTitle("Разрешение для Wi-Fi")
-                    .setMessage("AwayMode нужно разрешение на местоположение, чтобы Android разрешил читать имя подключённой сети и находить Wi-Fi поблизости. Геоданные приложение никуда не отправляет.")
+                    .setMessage("AwayMode нужно разрешение на местоположение, чтобы Android разрешил читать имя подключённой сети. Геоданные приложение никуда не отправляет.")
                     .setPositiveButton("Разрешить", (d, w) -> requestPermissions(new String[]{Manifest.permission.ACCESS_FINE_LOCATION}, REQ_LOCATION))
                     .setNegativeButton("Пока нет", (d, w) -> updatePermissionHint())
                     .show();
@@ -188,7 +180,7 @@ public class MainActivity extends Activity {
         super.onRequestPermissionsResult(requestCode, permissions, results);
         if (requestCode == REQ_LOCATION) {
             if (results.length > 0 && results[0] == PackageManager.PERMISSION_GRANTED) {
-                refreshCurrent(); scanNetworks(); requestNotificationPermissionIfNeeded();
+                refreshCurrent(); requestNotificationPermissionIfNeeded();
             } else updatePermissionHint();
         } else if (requestCode == REQ_NOTIFICATIONS) {
             updateAutomationUi();
@@ -201,7 +193,7 @@ public class MainActivity extends Activity {
     }
 
     private void updatePermissionHint() {
-        if (scanLabel != null) scanLabel.setText("Для поиска Wi-Fi и определения текущей сети нужно разрешение на местоположение. Нажми «Обновить сети» после выдачи разрешения.");
+        if (scanLabel != null) scanLabel.setText("Для определения имени подключённой Wi-Fi сети нужно разрешение на местоположение.");
     }
 
     private void refreshCurrent() {
@@ -225,63 +217,38 @@ public class MainActivity extends Activity {
         return raw.trim().isEmpty() ? null : raw.trim();
     }
 
-    private void scanNetworks() {
-        if (!hasLocationPermission()) {
-            requestStartupPermissions();
+    private void addCurrentNetwork() {
+        refreshCurrent();
+        if (currentSsid == null) {
+            Toast.makeText(this, "Сейчас не удалось определить подключённую сеть", Toast.LENGTH_SHORT).show();
             return;
         }
-        if (wifi == null) { scanLabel.setText("Wi-Fi недоступен на устройстве"); return; }
-        if (Build.VERSION.SDK_INT >= 28) {
-            LocationManager lm = (LocationManager) getSystemService(LOCATION_SERVICE);
-            if (lm != null && !lm.isLocationEnabled()) {
-                scanLabel.setText("Включи системную геолокацию — Android без неё не отдаёт результаты Wi-Fi-сканирования.");
-                new AlertDialog.Builder(this).setMessage("Для поиска сетей рядом включи геолокацию телефона.")
-                        .setPositiveButton("Открыть настройки", (d, w) -> startActivity(new Intent(Settings.ACTION_LOCATION_SOURCE_SETTINGS)))
-                        .setNegativeButton("Отмена", null).show();
-                return;
-            }
-        }
-        scanLabel.setText("Ищем сети… (Android может ограничивать частоту сканирования)");
-        try { wifi.startScan(); } catch (SecurityException ignored) {}
-        handler.postDelayed(() -> {
-            try {
-                List<ScanResult> found = wifi.getScanResults();
-                scanResults = found == null ? new ArrayList<>() : new ArrayList<>(found);
-                scanLabel.setText("Найдено сетей поблизости: " + scanResults.size());
-            } catch (SecurityException e) {
-                scanLabel.setText("Android не разрешил сканирование. Проверь разрешение местоположения.");
-            }
-            refreshCurrent();
-        }, 1600);
+        setMode(currentSsid, "none");
     }
 
     private void renderNetworks() {
         if (networkRows == null) return;
         networkRows.removeAllViews();
-        Map<String, ScanResult> all = new TreeMap<>(String.CASE_INSENSITIVE_ORDER);
-        for (ScanResult result : scanResults) {
-            String ssid = cleanSsid(result.SSID);
-            if (ssid != null && !ssid.isEmpty()) all.put(ssid, result);
-        }
-        for (String ssid : prefs.getStringSet(WHITE, Collections.emptySet())) all.putIfAbsent(ssid, null);
-        for (String ssid : prefs.getStringSet(BLACK, Collections.emptySet())) all.putIfAbsent(ssid, null);
-        if (currentSsid != null) all.putIfAbsent(currentSsid, null);
+        Map<String, Boolean> all = new java.util.TreeMap<>(String.CASE_INSENSITIVE_ORDER);
+        for (String ssid : prefs.getStringSet(WHITE, Collections.emptySet())) all.putIfAbsent(ssid, Boolean.TRUE);
+        for (String ssid : prefs.getStringSet(BLACK, Collections.emptySet())) all.putIfAbsent(ssid, Boolean.TRUE);
+        if (currentSsid != null) all.putIfAbsent(currentSsid, Boolean.TRUE);
 
         String filter = search == null ? "" : search.getText().toString().trim().toLowerCase();
         int shown = 0;
-        for (Map.Entry<String, ScanResult> entry : all.entrySet()) {
+        for (Map.Entry<String, Boolean> entry : all.entrySet()) {
             String ssid = entry.getKey();
             if (!ssid.toLowerCase().contains(filter)) continue;
             shown++;
-            addNetworkCard(ssid, entry.getValue());
+            addNetworkCard(ssid);
         }
         if (shown == 0) {
-            TextView empty = text(all.isEmpty() ? "Сети пока не найдены. Нажми «Обновить сети» или введи имя вручную." : "По этому запросу ничего не найдено.", 13, 0xFF9AA8BD, false);
+            TextView empty = text(all.isEmpty() ? "Список пуст. Подключись к сети и добавь текущую или введи имя вручную." : "По этому запросу ничего не найдено.", 13, 0xFF9AA8BD, false);
             card(empty, 12, 8);
         }
     }
 
-    private void addNetworkCard(String ssid, ScanResult result) {
+    private void addNetworkCard(String ssid) {
         LinearLayout card = new LinearLayout(this);
         card.setOrientation(LinearLayout.VERTICAL);
         card.setPadding(dp(12), dp(10), dp(12), dp(10));
@@ -295,9 +262,6 @@ public class MainActivity extends Activity {
         if (ssid.equals(currentSsid)) {
             TextView current = text("ПОДКЛЮЧЕНО", 9, 0xFF8FE0B0, true);
             heading.addView(current);
-        } else if (result != null) {
-            TextView signal = text(signalLabel(result.level), 10, 0xFF9AA8BD, false);
-            heading.addView(signal);
         } else {
             TextView saved = text("ДОБАВЛЕНА", 9, 0xFF9AA8BD, false);
             heading.addView(saved);
@@ -328,13 +292,6 @@ public class MainActivity extends Activity {
         LinearLayout.LayoutParams p = new LinearLayout.LayoutParams(0, dp(40), 1);
         p.rightMargin = dp(4);
         parent.addView(b, p);
-    }
-
-    private String signalLabel(int level) {
-        if (level >= -55) return "Сигнал отличный";
-        if (level >= -67) return "Сигнал хороший";
-        if (level >= -75) return "Сигнал слабый";
-        return "Далеко";
     }
 
     private String getMode(String ssid) {

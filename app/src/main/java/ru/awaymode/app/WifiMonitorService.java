@@ -12,7 +12,6 @@ import android.content.pm.PackageManager;
 import android.net.ConnectivityManager;
 import android.net.Network;
 import android.net.NetworkCapabilities;
-import android.net.NetworkRequest;
 import android.net.Uri;
 import android.net.wifi.WifiInfo;
 import android.net.wifi.WifiManager;
@@ -34,7 +33,6 @@ public class WifiMonitorService extends Service {
     private SharedPreferences prefs;
     private String statusText = "Ожидание изменения Wi-Fi";
     private boolean lastConnectRequested = true;
-    private boolean wifiLossPending = false;
 
     @Override public void onCreate() {
         super.onCreate();
@@ -43,7 +41,7 @@ public class WifiMonitorService extends Service {
         createChannel();
         startForeground(NOTIFICATION_ID, buildNotification("Мониторинг Wi-Fi запущен"));
         registerNetworkCallback();
-        scheduleEvaluation(1500);
+        scheduleEvaluation(3000);
     }
 
     @Override public int onStartCommand(Intent intent, int flags, int startId) {
@@ -55,21 +53,17 @@ public class WifiMonitorService extends Service {
         if (connectivity == null) { setStatus("Не удалось получить ConnectivityManager"); return; }
         callback = new ConnectivityManager.NetworkCallback() {
             @Override public void onAvailable(Network network) {
-                wifiLossPending = false;
-                scheduleEvaluation(2000);
+                scheduleEvaluation(3000);
             }
             @Override public void onLost(Network network) {
-                wifiLossPending = true;
-                scheduleEvaluation(12000);
+                scheduleEvaluation(3000);
             }
             @Override public void onCapabilitiesChanged(Network network, NetworkCapabilities caps) {
-                scheduleEvaluation(2000);
+                scheduleEvaluation(3000);
             }
         };
         try {
-            NetworkRequest request = new NetworkRequest.Builder()
-                    .addTransportType(NetworkCapabilities.TRANSPORT_WIFI).build();
-            connectivity.registerNetworkCallback(request, callback);
+            connectivity.registerDefaultNetworkCallback(callback);
         } catch (Exception e) {
             setStatus("Не удалось включить мониторинг: " + e.getClass().getSimpleName());
         }
@@ -88,16 +82,17 @@ public class WifiMonitorService extends Service {
         Set<String> black = prefs.getStringSet(MainActivity.BLACK, Collections.emptySet());
 
         if (current == null) {
-            if (wifiLossPending) {
-                wifiLossPending = false;
-                if (!previous.isEmpty() && white.contains(previous)) {
-                    requestVpnAction(true, "Покинули доверенную сеть «" + previous + "»: включаем INCY");
-                } else setStatus("Wi-Fi отключён; правило не требует действий");
+            if (isWifiConnected()) {
+                setStatus("Wi-Fi подключён, но имя сети недоступно; VPN не трогаем");
+            } else if (!previous.isEmpty() && white.contains(previous)) {
+                requestVpnAction(true, "Потеряли доверенную сеть «" + previous + "»: включаем INCY");
                 prefs.edit().putString(LAST_SSID, "").apply();
-            } else setStatus("Имя Wi-Fi временно недоступно; VPN не трогаем");
+            } else {
+                setStatus("Wi-Fi отключён; правило не требует действий");
+                prefs.edit().putString(LAST_SSID, "").apply();
+            }
             return;
         }
-        wifiLossPending = false;
         if (current.equals(previous)) {
             setStatus("Сеть «" + current + "» без изменений; VPN не трогаем");
             return;
@@ -108,22 +103,19 @@ public class WifiMonitorService extends Service {
         } else if (black.contains(current)) {
             requestVpnAction(true, "Сеть «" + current + "» в чёрном списке: включаем INCY");
         } else if (!previous.isEmpty() && white.contains(previous)) {
-            final String expectedCurrent = current;
-            setStatus("Покинули доверенную сеть; включим INCY через 12 секунд, если сеть не изменится");
-            handler.postDelayed(() -> {
-                String now = readSsid();
-                Set<String> latestWhite = prefs.getStringSet(MainActivity.WHITE, Collections.emptySet());
-                Set<String> latestBlack = prefs.getStringSet(MainActivity.BLACK, Collections.emptySet());
-                if (expectedCurrent.equals(now) && !latestWhite.contains(now)) {
-                    requestVpnAction(true, "Остались вне доверенной сети: включаем INCY");
-                } else if (now != null && latestWhite.contains(now)) {
-                    requestVpnAction(false, "Вернулись в доверенную сеть: отключаем INCY");
-                } else setStatus("Сеть изменилась во время ожидания; VPN не трогаем");
-            }, 12000);
+            requestVpnAction(true, "Покинули доверенную сеть; после 3 секунд проверки включаем INCY");
         } else {
             setStatus("Неизвестная сеть «" + current + "»: состояние VPN не меняем");
         }
         prefs.edit().putString(LAST_SSID, current).apply();
+    }
+
+    private boolean isWifiConnected() {
+        try {
+            Network active = connectivity == null ? null : connectivity.getActiveNetwork();
+            NetworkCapabilities caps = active == null ? null : connectivity.getNetworkCapabilities(active);
+            return caps != null && caps.hasTransport(NetworkCapabilities.TRANSPORT_WIFI);
+        } catch (Exception e) { return false; }
     }
 
     private String readSsid() {
